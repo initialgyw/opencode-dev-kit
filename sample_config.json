@@ -1,0 +1,66 @@
+{
+  "skills": [],
+  "agents": [],
+  "plugins": [],
+  "model-aliases": {
+    "opus": {
+      "model": "anthropic/claude-opus-5-5",
+      "variant": "high"
+    },
+    "google": {
+      "model": "google/gemini-3.8-flash",
+      "variant": "high"
+    }
+  },
+  "agent-models": {
+    "profile1": {
+      "planner": "opus",
+      "builder": "opus",
+      "researcher": "google",
+      "observer": "google",
+      "coder": "opus",
+      "code-reviewer": {
+        "alias": "opus",
+        "variant": "high"
+      }
+    },
+    "profile2": {
+      "planner": "google",
+      "builder": "google",
+      "researcher": "google",
+      "observer": "google",
+      "coder": "google",
+      "code-reviewer": "opus"
+    }
+  },
+  "opencode_json": {
+    "providers": {
+      "custom-openai": {
+        "npm": "@ai-sdk/openai",
+        "options": {
+          "baseURL": "https://api.example.invalid/v1",
+          "apiKey": "{env:CUSTOM_OPENAI_API_KEY}"
+        },
+        "models": {
+          "custom-reasoning-model": {
+            "name": "Custom Reasoning Model",
+            "reasoning": true,
+            "tool_call": true,
+            "temperature": false,
+            "variants": {
+              "low": {
+                "reasoningEffort": "low"
+              },
+              "medium": {
+                "reasoningEffort": "medium"
+              },
+              "high": {
+                "reasoningEffort": "high"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

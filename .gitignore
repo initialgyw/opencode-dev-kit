@@ -1,0 +1,9 @@
+node_modules
+package.json
+package-lock.json
+bun.lock
+__pycache__/
+*.py[cod]
+.opencode/.install-cache/
+.opencode/.install-backups/
+.opencode/.install-state.json
