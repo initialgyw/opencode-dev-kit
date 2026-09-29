@@ -37,7 +37,7 @@ def directory_server(root: Path):
 class InstallerTests(unittest.TestCase):
     def test_bundled_agent_inventory_and_delegation_boundaries(self) -> None:
         agents_dir = install.SCRIPT_DIR / "agents"
-        for agent_name in ("plan", "build", "coder", "researcher", "observer", "reviewer"):
+        for agent_name in ("plan", "build", "coder", "researcher", "observer", "documenter", "reviewer"):
             self.assertTrue((agents_dir / f"{agent_name}.md").is_file())
         for removed_name in ("planner", "builder", "code-reviewer"):
             self.assertFalse((agents_dir / f"{removed_name}.md").exists())
@@ -52,11 +52,29 @@ class InstallerTests(unittest.TestCase):
 
         build = (agents_dir / "build.md").read_text(encoding="utf-8")
         self.assertIn("mode: primary", build)
-        for delegate in ("researcher", "coder", "observer", "reviewer"):
+        for delegate in ("researcher", "coder", "documenter", "observer", "reviewer"):
             self.assertIn(f"    {delegate}: allow", build)
         self.assertIn("Clarification gate", build)
         self.assertIn("what to look for", build)
+        self.assertIn("documentation-only", build)
         self.assertNotIn("magnite", build.lower())
+
+        documenter = (agents_dir / "documenter.md").read_text(encoding="utf-8")
+        self.assertIn("mode: subagent", documenter)
+        self.assertIn("edit: true", documenter)
+        self.assertIn("write: true", documenter)
+        self.assertIn("Documentation-only requests belong here", documenter)
+        self.assertIn('"**/*.md": allow', documenter)
+        self.assertIn('"**/agent/**": deny', documenter)
+        self.assertIn('"**/agents/**": deny', documenter)
+        self.assertIn('"**/command/**": deny', documenter)
+        self.assertIn('"**/commands/**": deny', documenter)
+        self.assertIn('"**/skill/**": deny', documenter)
+        self.assertIn('"**/skills/**": deny', documenter)
+        self.assertIn('"**/AGENTS.md": deny', documenter)
+        self.assertIn('"**/.*/**": deny', documenter)
+        self.assertIn('"**/SKILL.md": deny', documenter)
+        self.assertNotIn("`SKILL.md`", documenter)
 
         reviewer = (agents_dir / "reviewer.md").read_text(encoding="utf-8")
         self.assertIn("mode: subagent", reviewer)
@@ -82,9 +100,11 @@ class InstallerTests(unittest.TestCase):
                                 "coder": "opus",
                                 "observer": {"alias": "fast", "variant": "low"},
                                 "reviewer": "opus",
+                                "documenter": "fast",
                             },
                             "profile2": {
-                                "coder": "fast"
+                                "coder": "fast",
+                                "documenter": "fast"
                             }
                         },
                     }
@@ -109,12 +129,20 @@ class InstallerTests(unittest.TestCase):
                 {"mode": "subagent", "model": "anthropic/claude-opus-5-5", "variant": "high"},
             )
             self.assertEqual(
+                runtime["agent"]["documenter"],
+                {"mode": "subagent", "model": "google/gemini-3.8-flash"},
+            )
+            self.assertEqual(
                 install.run(["--target", str(project), "--config", str(config), "--profile", "profile2"]),
                 0,
             )
             switched = json.loads((project / ".opencode/opencode.json").read_text(encoding="utf-8"))
             self.assertEqual(
                 switched["agent"]["coder"],
+                {"mode": "subagent", "model": "google/gemini-3.8-flash"},
+            )
+            self.assertEqual(
+                switched["agent"]["documenter"],
                 {"mode": "subagent", "model": "google/gemini-3.8-flash"},
             )
 
@@ -357,7 +385,7 @@ class InstallerTests(unittest.TestCase):
             skill = target / "skills" / "code-philosophy"
             self.assertTrue(skill.is_symlink())
             self.assertEqual(skill.resolve(), (install.SCRIPT_DIR / "skills/code-philosophy").resolve())
-            for agent_name in ("plan", "build", "coder", "researcher", "observer", "reviewer"):
+            for agent_name in ("plan", "build", "coder", "researcher", "observer", "documenter", "reviewer"):
                 installed = target / "agents" / f"{agent_name}.md"
                 self.assertTrue(installed.is_symlink())
                 self.assertEqual(installed.resolve(), (install.SCRIPT_DIR / f"agents/{agent_name}.md").resolve())

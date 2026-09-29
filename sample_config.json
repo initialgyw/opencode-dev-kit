@@ -20,13 +20,15 @@
       "reviewer": {
         "alias": "opus",
         "variant": "high"
-      }
+      },
+      "documenter": "google"
     },
     "profile2": {
       "coder": "google",
       "researcher": "google",
       "observer": "google",
-      "reviewer": "opus"
+      "reviewer": "opus",
+      "documenter": "google"
     }
   },
   "opencode_json": {

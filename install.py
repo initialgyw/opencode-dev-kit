@@ -27,7 +27,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 SCRIPT_DIR = Path(__file__).resolve().parent
 BUNDLED_SENTINEL = "__bundled__"
 VALID_AGENT_MODES = {"primary", "subagent", "all"}
-PROFILE_MANAGED_AGENTS = frozenset({"coder", "researcher", "observer", "reviewer"})
+PROFILE_MANAGED_AGENTS = frozenset({"coder", "researcher", "observer", "reviewer", "documenter"})
 SAFE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 MAX_FILE_BYTES = 10 * 1024 * 1024

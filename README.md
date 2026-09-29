@@ -4,7 +4,7 @@ Reusable OpenCode agents and skills for planning, investigation, implementation,
 
 ## How it works
 
-The kit bundles `plan` and `build` as primary entry points that override OpenCode's built-in agents when installed. Planning delegates evidence gathering to `researcher` and `observer`. Build delegates clarification and verification to `researcher` and `observer`, repository changes to `coder`, and coding review to `reviewer`.
+The kit bundles `plan` and `build` as primary entry points that override OpenCode's built-in agents when installed. Planning delegates evidence gathering to `researcher` and `observer`. Build can perform approved non-coding actions directly, delegates documentation-only edits to `documenter`, coding changes to `coder`, clarification and verification to `researcher` and `observer`, and coding review to `reviewer`.
 
 ```mermaid
 flowchart TD
@@ -14,16 +14,18 @@ flowchart TD
 
     U --> B[Bundled Build]
     B --> BR[Researcher]
-    B --> Q{Coding request?}
-    Q -->|Yes| C[Coder]
+    B --> T{Change type?}
+    T -->|Documentation| D[Documenter]
+    D --> B
+    T -->|Coding| C[Coder]
     C --> V[Reviewer]
     V --> B
-    Q -->|No| N[Non-code change]
+    T -->|Non-code action| N[Direct approved action]
     N --> OV[Observer verification]
     OV --> B
 ```
 
-Coding work flows through `coder` and then `reviewer`. Non-coding work ends with `observer` verification. When information is missing, plan and build ask both `researcher` and `observer` what to inspect before proceeding. An unexplained failure returns to the primary plan agent for evidence-backed investigation instead of guessing.
+Coding work flows through `coder` and then `reviewer`. Documentation-only work flows through `documenter`. Build may perform approved non-coding actions directly and uses `observer` for outcome verification. When information is missing, plan and build ask both `researcher` and `observer` what to inspect before proceeding. An unexplained failure returns to the primary plan agent for evidence-backed investigation instead of guessing.
 
 ## Operating principles
 
@@ -77,7 +79,7 @@ cp sample_config.json config.json
 ./install.py --config config.json --profile profile1
 ```
 
-`model-aliases` are user-defined names that point to canonical `provider/model-id` values and optional variants. `agent-models` maps bundled delegated agents — `coder`, `researcher`, `observer`, and `reviewer` — through those aliases, canonical IDs, or per-agent overrides. Primary `plan` and `build` models are managed manually in the runtime configuration, and `--profile` rejects assignments for those primary names. Provider and model objects are deep-merged by ID: supplied fields override existing fields while unspecified fields and existing providers remain. The installer maps `opencode_json.providers` to the runtime `provider` key. Use environment-based credential interpolation or a credential-injecting plugin; never commit secrets to the config.
+`model-aliases` are user-defined names that point to canonical `provider/model-id` values and optional variants. `agent-models` maps bundled delegated agents — `coder`, `researcher`, `observer`, `reviewer`, and `documenter` — through those aliases, canonical IDs, or per-agent overrides. Primary `plan` and `build` models are managed manually in the runtime configuration, and `--profile` rejects assignments for those primary names. Provider and model objects are deep-merged by ID: supplied fields override existing fields while unspecified fields and existing providers remain. The installer maps `opencode_json.providers` to the runtime `provider` key. Use environment-based credential interpolation or a credential-injecting plugin; never commit secrets to the config.
 
 `--profile NAME` requires the explicit `--config` option. If its optional path is omitted, `--config` loads `./config.json`; without `--profile`, content installs normally and existing agent routing is unchanged. Config sources are processed before command-line sources; exact duplicates are deduplicated, differing same-name content fails before the target changes, and bundled content wins a name conflict.
 
@@ -99,7 +101,7 @@ Build mode:
 Provide the approved plan text or an exact saved plan path.
 ```
 
-`approved` is not a special OpenCode control token. Pass the approved plan text or an exact saved plan path; the build session should not be expected to inherit the complete planning transcript. When more information is needed, plan delegates to both `researcher` and `observer` with specific questions and evidence requirements. Build uses the same clarification gate before implementation or operational action. Build delegates repository changes to `coder`, coding review to `reviewer`, and post-change verification to `observer`. Unknown root causes are handed back to plan for evidence-backed investigation rather than guessed.
+`approved` is not a special OpenCode control token. Pass the approved plan text or an exact saved plan path; the build session should not be expected to inherit the complete planning transcript. When more information is needed, plan delegates to both `researcher` and `observer` with specific questions and evidence requirements. Build uses the same clarification gate before implementation or operational action. Build delegates documentation-only edits to `documenter`, coding changes to `coder`, coding review to `reviewer`, and post-change verification to `observer`; approved non-coding actions may be performed directly. Unknown root causes are handed back to plan for evidence-backed investigation rather than guessed.
 
 ## Agents, skills, and validation
 
@@ -110,8 +112,9 @@ Provide the approved plan text or an exact saved plan path.
 | Bundled `plan` / `build` | Primary planning and execution modes that override OpenCode built-ins. Their models are managed manually. |
 | `researcher` | Read-only local/public documentation research with cited findings; never runs shell commands or delegates. |
 | `observer` | Read-only state, log, and outcome verification; cannot edit or delegate. Unknown operational tools require an explicitly audited read-only allowlist. |
-| `coder` | Implements delegated repository changes using `code-philosophy`. |
-| `reviewer` | Reviews completed changes without editing or running shell commands, using `code-philosophy`. |
+| `documenter` | Edits ordinary Markdown and plain-text documentation only; cannot edit runtime configuration, code, or delegate. |
+| `coder` | Implements delegated coding changes using `code-philosophy`. |
+| `reviewer` | Reviews completed coding changes without editing or running shell commands, using `code-philosophy`. |
 | `code-philosophy` | Baseline for correct, secure, testable, maintainable implementation and review. |
 | `summarize-investigation` | Evidence-based investigation report skill for timelines, findings, root cause, and remediation. |
 
@@ -128,8 +131,8 @@ python3 -m unittest discover -s tests -v
 
 Confirm that:
 
-- Installed `plan` and `build` are primary, with `researcher`, `observer`, `coder`, and `reviewer` available as delegated agents.
-- Plan and build ask `researcher` and `observer` for targeted evidence when clarification is needed; build delegates repository edits to `coder`, and `observer` and `reviewer` remain read-only.
+- Installed `plan` and `build` are primary, with `researcher`, `observer`, `documenter`, `coder`, and `reviewer` available as delegated agents.
+- Plan and build ask `researcher` and `observer` for targeted evidence when clarification is needed; build delegates documentation to `documenter`, coding to `coder`, and keeps `observer` and `reviewer` read-only.
 - Permission rules match the inventory: content searches may require approval because sensitive paths cannot be excluded from `grep` results.
 - Observer outcomes use `PASS`, `WARN`, `FAIL`, `ERROR`, or `CANNOT VERIFY`; tool and credential failures are not healthy results.
 - Selected plugins appear as symlinks under `.opencode/plugins/` and are not executed by the installer.
