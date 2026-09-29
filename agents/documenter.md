@@ -11,24 +11,8 @@ permission:
   glob: allow
   grep: allow
   list: allow
-  edit:
-    "*": ask
-    "**/*.md": allow
-    "**/*.txt": allow
-  write:
-    "*": deny
-    "**/*.md": allow
-    "**/*.txt": allow
-    "**/agent/**": deny
-    "**/agents/**": deny
-    "**/command/**": deny
-    "**/commands/**": deny
-    "**/skill/**": deny
-    "**/skills/**": deny
-    "**/AGENTS.md": deny
-    "AGENTS.md": deny
-    "**/.*/**": deny
-    "**/SKILL.md": deny
+  edit: allow
+  write: allow
   bash: deny
   task: deny
 ---

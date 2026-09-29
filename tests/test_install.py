@@ -254,51 +254,120 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("Never modify code, configuration, tests, or repository state", reviewer)
         self.assertIn("Never run shell commands", reviewer)
 
-    def test_readme_documents_documentation_workflow(self) -> None:
+    def test_readme_documents_installation_and_external_sources(self) -> None:
         readme = (install.SCRIPT_DIR / "README.md").read_text(encoding="utf-8")
 
         self.assertIn(
-            "For README plans, Plan delegates `researcher` to read the target README and relevant source of truth; Build reuses that research.",
+            "## Install\n",
             readme,
         )
         self.assertIn(
-            "Use `observer` only when current runtime or operational evidence is required, not for static repository or documentation facts.",
-            readme,
-        )
-        self.assertIn("Provide the complete approved plan text, including findings and acceptance criteria", readme)
-        self.assertIn(
-            "If the handoff is unavailable or incomplete, Build requests the handoff or returns to Plan; it re-researches only for a named material gap, conflict, or stale fact.",
+            "`install.py` links bundled agents and skills, plus selected plugins, into a project's `.opencode/` directory.",
             readme,
         )
         self.assertIn(
-            "for any plan type—implementation, investigation, operational, or documentation",
+            "`--target` accepts a project directory or an explicit `.opencode` directory.",
             readme,
         )
         self.assertIn(
-            "the final handoff to Build includes the complete plan and all bounded summaries Plan relied on",
+            "The installer creates relative links for bundled content",
             readme,
         )
-        for field in (
-            "roles, sources, and citations",
-            "findings, status, and classification",
-            "decisions and implications",
-            "assumptions",
-            "unknowns, including `CANNOT VERIFY`",
-            "conflicts",
-            "acceptance and verification implications",
-            "baseline, time window, and rollback when relevant",
+        self.assertIn(
+            "### External sources\n",
+            readme,
+        )
+        self.assertIn(
+            "Local paths, HTTP(S) URLs, and GitHub repository-tree URLs are supported.",
+            readme,
+        )
+        self.assertIn(
+            "A no-value plural flag explicitly selects its bundled collection; no flags select bundled agents and skills.",
+            readme,
+        )
+        self.assertIn("Files below a skill directory, including references, are retained.", readme)
+        self.assertIn("Review plugin source before installation.", readme)
+
+    def test_readme_documents_config_json_contract(self) -> None:
+        readme = (install.SCRIPT_DIR / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("## config.json\n", readme)
+        config_section = readme.split("## config.json\n", 1)[1].split(
+            "\n## Agents and Skills\n", 1
+        )[0]
+        self.assertIn(
+            "Copy [`sample_config.json`](sample_config.json) to `config.json`; this is the installer's input, not OpenCode's runtime config.",
+            config_section,
+        )
+        self.assertIn(
+            "Any runtime config the installer writes is `.opencode/opencode.json`.",
+            config_section,
+        )
+        self.assertIn(
+            "`--config PATH` loads the specified installer input; `--config` without a path reads `./config.json` from the current working directory.",
+            config_section,
+        )
+        self.assertIn(
+            "Relative local source paths in `skills`, `agents`, and `plugins` resolve relative to the config file.",
+            config_section,
+        )
+        self.assertIn("No top-level key is required", config_section)
+        self.assertIn("the file must be a JSON object", config_section)
+        self.assertIn("| Optional top-level key | Default | Purpose |", config_section)
+        for key, default in (
+            ("skills", "[]"),
+            ("agents", "[]"),
+            ("plugins", "[]"),
+            ("model-aliases", "{}"),
+            ("agent-models", "{}"),
+            ("opencode_json", "{}"),
         ):
-            with self.subTest(field=field):
-                self.assertIn(field, readme)
-        self.assertIn("Do not copy raw documents or logs", readme)
-        self.assertIn("mark non-applicable fields `none` or `not applicable`", readme)
-        self.assertIn(
-            "After every `documenter` edit, Build sends the changed documentation, approved plan, and acceptance criteria to `reviewer` for a focused final-diff check",
-            readme,
+            with self.subTest(config_key=key):
+                self.assertIn(f"| `{key}` | `{default}` |", config_section)
+
+    def test_readme_lists_separate_agent_and_skill_inventories(self) -> None:
+        readme = (install.SCRIPT_DIR / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("## Agents and Skills\n", readme)
+        self.assertIn("### Agents\n", readme)
+        self.assertIn("### Skills\n", readme)
+        agents_section = readme.split("### Agents\n", 1)[1].split(
+            "\n### Skills\n", 1
+        )[0]
+        skills_section = readme.split("### Skills\n", 1)[1].split(
+            "\n### How to run tests\n", 1
+        )[0]
+        agent_names = [
+            line.split("|", 2)[1].strip().strip("`")
+            for line in agents_section.splitlines()
+            if line.startswith("| `")
+        ]
+        skill_names = [
+            line.split("|", 2)[1].strip().strip("`")
+            for line in skills_section.splitlines()
+            if line.startswith("| `")
+        ]
+
+        self.assertEqual(
+            agent_names,
+            ["plan", "build", "coder", "researcher", "observer", "documenter", "reviewer"],
         )
-        self.assertNotRegex(readme, r"(?m)^## How it works[ \t]*$")
-        self.assertIn("this prompt is not an enforced shell-permission boundary", readme)
-        self.assertIn("configured permissions must be considered separately", readme)
+        self.assertEqual(skill_names, ["code-philosophy", "summarize-investigation"])
+
+    def test_readme_documents_test_command_and_sessions(self) -> None:
+        readme = (install.SCRIPT_DIR / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("### How to run tests\n", readme)
+        test_section = readme.split("### How to run tests\n", 1)[1].split(
+            "\n## Sessions\n", 1
+        )[0]
+        self.assertEqual(
+            [block.strip() for block in test_section.split("```")[1::2]],
+            ["shell\npython3 -m unittest discover -s tests -v"],
+        )
+        self.assertIn("## Sessions\n", readme)
+        self.assertIn("Keep one bounded objective per session.", readme)
+        self.assertIn("a concise handoff and a fresh session", readme)
 
     def test_list_profiles_resolves_assignments_in_config_order(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

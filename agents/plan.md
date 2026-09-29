@@ -6,6 +6,7 @@ tools:
   write: false
   bash: true
   tool: true
+  skill: true
 permission:
   "*": ask
   edit: deny
@@ -18,6 +19,8 @@ permission:
   glob: allow
   read: allow
   webfetch: allow
+  skill: allow
+  grep: allow
   task:
     "*": deny
     researcher: allow
