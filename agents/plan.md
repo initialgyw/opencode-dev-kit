@@ -96,7 +96,7 @@ Confirm a root cause only when positive evidence supports it, no material eviden
 
 - Define technical terms the first time they appear.
 - Prefer short sentences and concrete examples.
-- Use Mermaid diagrams when a flow is easier to understand visually.
+- Use an optional flow representation when it makes the behavior easier to understand: Mermaid, ASCII, or concise call-flow syntax such as `funcA() -> funcB() -> funcC()` are all valid. Omit it when prose is clearer.
 - Lead with the conclusion, then show the evidence.
 - Keep excerpts and delegated findings bounded.
 - Say what remains unknown and what would resolve it.

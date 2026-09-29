@@ -41,13 +41,13 @@ Write for a junior engineer who has no background in the system:
 - Identify each component's responsibility and the boundary where the failure occurred.
 - Use short sentences and concrete language.
 
-Include at least one Mermaid diagram:
+Include a flow representation when it materially clarifies the investigation; omit it when concise prose is clearer. Mermaid, ASCII, or concise call/data-flow syntax such as `funcA() -> funcB() -> funcC()` are all valid.
 
-- For a code investigation, show the call or data flow from entry point to the failing branch.
-- For system troubleshooting, show the participating services or hosts, their normal interactions, and the observed failure point.
-- Include both diagrams when both views are needed to understand the incident.
+- For a code investigation, show the call or data flow from entry point to the failing branch when useful.
+- For system troubleshooting, show the participating services or hosts, their normal interactions, and the observed failure point when useful.
+- Include both views only when both are needed to understand the incident.
 
-The diagram must reflect verified behavior. Mark inferred edges as assumptions.
+Any flow representation must reflect verified behavior. Mark inferred edges as assumptions.
 
 ## Explain every investigation step
 
@@ -74,12 +74,7 @@ Use this structure, omitting only optional sections that truly do not apply:
 ## How the System Works
 <Normal behavior and definitions needed by a new engineer.>
 
-```mermaid
-flowchart TD
-    A[Starting component] --> B[Next component]
-    B --> C[Expected destination]
-    B -->|Observed failure| D[Failure point]
-```
+<Optional verified flow representation, if useful. Use Mermaid, ASCII, or concise call-flow text such as `funcA() -> funcB() -> funcC()`; omit it when prose is clearer.>
 
 ## Impact and Scope
 - **Started**: <timestamp and timezone, or unknown>
@@ -147,7 +142,7 @@ Before saving or returning the report, confirm that:
 - Every step explains why it was chosen and what it established.
 - Included log lines are exact and contain no sensitive information.
 - No secret value appears anywhere in the report.
-- The diagram matches the written explanation.
+- Any included flow representation matches the written explanation.
 - Root cause is not stated more confidently than the evidence permits.
 - Immediate recovery and permanent correction are clearly separated.
 - A junior engineer can understand the report without hidden context.

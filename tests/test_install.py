@@ -48,6 +48,9 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("observer: allow", plan)
         self.assertIn("Required information-gathering gate", plan)
         self.assertIn("what the subagent should look for", plan)
+        self.assertIn("optional flow representation", plan)
+        self.assertIn("funcA() -> funcB() -> funcC()", plan)
+        self.assertNotIn("Use Mermaid diagrams when", plan)
         self.assertNotIn("magnite", plan.lower())
 
         build = (agents_dir / "build.md").read_text(encoding="utf-8")
@@ -75,6 +78,15 @@ class InstallerTests(unittest.TestCase):
         self.assertIn('"**/.*/**": deny', documenter)
         self.assertIn('"**/SKILL.md": deny', documenter)
         self.assertNotIn("`SKILL.md`", documenter)
+
+        investigation_skill = (install.SCRIPT_DIR / "skills/summarize-investigation/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("Mermaid, ASCII, or concise call/data-flow syntax", investigation_skill)
+        self.assertIn("funcA() -> funcB() -> funcC()", investigation_skill)
+        self.assertIn("Optional verified flow representation", investigation_skill)
+        self.assertIn("omit it when prose is clearer", investigation_skill)
+        self.assertIn("Any flow representation must reflect verified behavior", investigation_skill)
+        self.assertNotIn("Include at least one Mermaid diagram", investigation_skill)
+        self.assertNotIn("```mermaid\nflowchart TD", investigation_skill)
 
         reviewer = (agents_dir / "reviewer.md").read_text(encoding="utf-8")
         self.assertIn("mode: subagent", reviewer)
