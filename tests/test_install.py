@@ -35,18 +35,65 @@ def directory_server(root: Path):
 
 
 class InstallerTests(unittest.TestCase):
-    def test_orchestrator_modes_and_read_only_planner_permissions(self) -> None:
-        planner = (install.SCRIPT_DIR / "agents/planner.md").read_text(encoding="utf-8")
-        builder = (install.SCRIPT_DIR / "agents/builder.md").read_text(encoding="utf-8")
-        self.assertIn("mode: subagent", planner)
-        self.assertIn("bash: false", planner)
-        self.assertIn("bash: deny", planner)
-        self.assertIn("researcher: allow", planner)
-        self.assertIn("observer: allow", planner)
-        self.assertIn("mode: subagent", builder)
-        self.assertIn("coder: allow", builder)
-        self.assertIn("code-reviewer: allow", builder)
-        self.assertIn("observer: allow", builder)
+    def test_bundled_agent_inventory_and_delegation_boundaries(self) -> None:
+        agents_dir = install.SCRIPT_DIR / "agents"
+        for agent_name in ("plan", "build", "coder", "researcher", "observer", "documenter", "reviewer"):
+            self.assertTrue((agents_dir / f"{agent_name}.md").is_file())
+        for removed_name in ("planner", "builder", "code-reviewer"):
+            self.assertFalse((agents_dir / f"{removed_name}.md").exists())
+
+        plan = (agents_dir / "plan.md").read_text(encoding="utf-8")
+        self.assertIn("mode: primary", plan)
+        self.assertIn("researcher: allow", plan)
+        self.assertIn("observer: allow", plan)
+        self.assertIn("Required information-gathering gate", plan)
+        self.assertIn("what the subagent should look for", plan)
+        self.assertIn("optional flow representation", plan)
+        self.assertIn("funcA() -> funcB() -> funcC()", plan)
+        self.assertNotIn("Use Mermaid diagrams when", plan)
+        self.assertNotIn("magnite", plan.lower())
+
+        build = (agents_dir / "build.md").read_text(encoding="utf-8")
+        self.assertIn("mode: primary", build)
+        for delegate in ("researcher", "coder", "documenter", "observer", "reviewer"):
+            self.assertIn(f"    {delegate}: allow", build)
+        self.assertIn("Clarification gate", build)
+        self.assertIn("what to look for", build)
+        self.assertIn("documentation-only", build)
+        self.assertNotIn("magnite", build.lower())
+
+        documenter = (agents_dir / "documenter.md").read_text(encoding="utf-8")
+        self.assertIn("mode: subagent", documenter)
+        self.assertIn("edit: true", documenter)
+        self.assertIn("write: true", documenter)
+        self.assertIn("Documentation-only requests belong here", documenter)
+        self.assertIn('"**/*.md": allow', documenter)
+        self.assertIn('"**/agent/**": deny', documenter)
+        self.assertIn('"**/agents/**": deny', documenter)
+        self.assertIn('"**/command/**": deny', documenter)
+        self.assertIn('"**/commands/**": deny', documenter)
+        self.assertIn('"**/skill/**": deny', documenter)
+        self.assertIn('"**/skills/**": deny', documenter)
+        self.assertIn('"**/AGENTS.md": deny', documenter)
+        self.assertIn('"**/.*/**": deny', documenter)
+        self.assertIn('"**/SKILL.md": deny', documenter)
+        self.assertNotIn("`SKILL.md`", documenter)
+
+        investigation_skill = (install.SCRIPT_DIR / "skills/summarize-investigation/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("Mermaid, ASCII, or concise call/data-flow syntax", investigation_skill)
+        self.assertIn("funcA() -> funcB() -> funcC()", investigation_skill)
+        self.assertIn("Optional verified flow representation", investigation_skill)
+        self.assertIn("omit it when prose is clearer", investigation_skill)
+        self.assertIn("Any flow representation must reflect verified behavior", investigation_skill)
+        self.assertNotIn("Include at least one Mermaid diagram", investigation_skill)
+        self.assertNotIn("```mermaid\nflowchart TD", investigation_skill)
+
+        reviewer = (agents_dir / "reviewer.md").read_text(encoding="utf-8")
+        self.assertIn("mode: subagent", reviewer)
+        self.assertIn("edit: false", reviewer)
+        self.assertIn("write: false", reviewer)
+        self.assertIn('"*": deny', reviewer)
+        self.assertNotIn('"researcher": allow', reviewer)
 
     def test_agent_model_aliases_and_variants_write_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -62,11 +109,14 @@ class InstallerTests(unittest.TestCase):
                         },
                         "agent-models": {
                             "profile1": {
-                                "planner": "opus",
+                                "coder": "opus",
                                 "observer": {"alias": "fast", "variant": "low"},
+                                "reviewer": "opus",
+                                "documenter": "fast",
                             },
                             "profile2": {
-                                "planner": "fast"
+                                "coder": "fast",
+                                "documenter": "fast"
                             }
                         },
                     }
@@ -79,7 +129,7 @@ class InstallerTests(unittest.TestCase):
             )
             runtime = json.loads((project / ".opencode/opencode.json").read_text(encoding="utf-8"))
             self.assertEqual(
-                runtime["agent"]["planner"],
+                runtime["agent"]["coder"],
                 {"mode": "subagent", "model": "anthropic/claude-opus-5-5", "variant": "high"},
             )
             self.assertEqual(
@@ -87,14 +137,95 @@ class InstallerTests(unittest.TestCase):
                 {"mode": "subagent", "model": "google/gemini-3.8-flash", "variant": "low"},
             )
             self.assertEqual(
+                runtime["agent"]["reviewer"],
+                {"mode": "subagent", "model": "anthropic/claude-opus-5-5", "variant": "high"},
+            )
+            self.assertEqual(
+                runtime["agent"]["documenter"],
+                {"mode": "subagent", "model": "google/gemini-3.8-flash"},
+            )
+            self.assertEqual(
                 install.run(["--target", str(project), "--config", str(config), "--profile", "profile2"]),
                 0,
             )
             switched = json.loads((project / ".opencode/opencode.json").read_text(encoding="utf-8"))
             self.assertEqual(
-                switched["agent"]["planner"],
+                switched["agent"]["coder"],
                 {"mode": "subagent", "model": "google/gemini-3.8-flash"},
             )
+            self.assertEqual(
+                switched["agent"]["documenter"],
+                {"mode": "subagent", "model": "google/gemini-3.8-flash"},
+            )
+
+    def test_profile_does_not_override_primary_agent_models(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "project"
+            runtime_config = project / ".opencode/opencode.json"
+            runtime_config.parent.mkdir(parents=True)
+            original = {
+                "agent": {
+                    "plan": {"mode": "primary", "model": "manual/plan-model"},
+                    "build": {"mode": "primary", "model": "manual/build-model"},
+                }
+            }
+            runtime_config.write_text(json.dumps(original), encoding="utf-8")
+            config = root / "config.json"
+            config.write_text(
+                json.dumps({"agent-models": {"profile1": {"coder": "provider/coder-model"}}}),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                install.run(["--target", str(project), "--config", str(config), "--profile", "profile1"]),
+                0,
+            )
+            runtime = json.loads(runtime_config.read_text(encoding="utf-8"))
+            self.assertEqual(runtime["agent"]["plan"], original["agent"]["plan"])
+            self.assertEqual(runtime["agent"]["build"], original["agent"]["build"])
+            self.assertNotIn("subagent_depth", runtime)
+
+    def test_profile_rejects_primary_agent_model_assignments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "project"
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "agent-models": {
+                            "profile1": {
+                                "plan": "provider/plan-model",
+                                "build": "provider/build-model",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                install.run(["--target", str(project), "--config", str(config), "--profile", "profile1"]),
+                1,
+            )
+            self.assertFalse(project.exists())
+
+    def test_profile_rejects_non_specialist_agent_model_assignments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "project"
+            config = root / "config.json"
+            config.write_text(
+                json.dumps({"agent-models": {"profile1": {"diagnostician": "provider/model"}}}),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                install.run(["--target", str(project), "--config", str(config), "--profile", "profile1"]),
+                1,
+            )
+            self.assertFalse(project.exists())
 
     def test_unknown_agent_model_alias_fails_before_target_changes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -102,7 +233,7 @@ class InstallerTests(unittest.TestCase):
             project = root / "project"
             config = root / "config.json"
             config.write_text(
-                json.dumps({"agent-models": {"profile1": {"planner": "missing-alias"}}}),
+                json.dumps({"agent-models": {"profile1": {"coder": "missing-alias"}}}),
                 encoding="utf-8",
             )
             self.assertEqual(
@@ -117,7 +248,7 @@ class InstallerTests(unittest.TestCase):
             project = root / "project"
             config = root / "config.json"
             config.write_text(
-                json.dumps({"agent-models": {"planner": {"alias": "opus", "variant": "high"}}}),
+                json.dumps({"agent-models": {"coder": {"alias": "opus", "variant": "high"}}}),
                 encoding="utf-8",
             )
             self.assertEqual(install.run(["--target", str(project), "--config", str(config)]), 1)
@@ -135,16 +266,21 @@ class InstallerTests(unittest.TestCase):
             project = root / "project"
             runtime_config = project / ".opencode/opencode.json"
             runtime_config.parent.mkdir(parents=True)
-            original = {"agent": {"planner": {"model": "existing/provider-model"}}}
-            expected = {**original, "subagent_depth": 2}
+            original = {
+                "agent": {
+                    "plan": {"model": "existing/plan-model"},
+                    "build": {"model": "existing/build-model"},
+                    "coder": {"model": "existing/coder-model"},
+                }
+            }
             runtime_config.write_text(json.dumps(original), encoding="utf-8")
             config = root / "config.json"
             config.write_text(
-                json.dumps({"agent-models": {"profile1": {"planner": "opus"}}}),
+                json.dumps({"agent-models": {"profile1": {"coder": "opus"}}}),
                 encoding="utf-8",
             )
             self.assertEqual(install.run(["--target", str(project), "--config", str(config)]), 0)
-            self.assertEqual(json.loads(runtime_config.read_text(encoding="utf-8")), expected)
+            self.assertEqual(json.loads(runtime_config.read_text(encoding="utf-8")), original)
 
     def test_provider_overlay_merges_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -250,7 +386,7 @@ class InstallerTests(unittest.TestCase):
             )
             self.assertEqual(install.run(["--target", str(project), "--config", str(config)]), 1)
             self.assertEqual(json.loads(runtime_config.read_text(encoding="utf-8")), original)
-            self.assertFalse((project / ".opencode/agents/builder.md").exists())
+            self.assertFalse((project / ".opencode/agents/reviewer.md").exists())
 
     def test_default_install_creates_relative_links(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -258,12 +394,16 @@ class InstallerTests(unittest.TestCase):
             project.mkdir()
             self.assertEqual(install.run(["--target", str(project)]), 0)
             target = project / ".opencode"
-            planner = target / "agents" / "planner.md"
             skill = target / "skills" / "code-philosophy"
-            self.assertTrue(planner.is_symlink())
             self.assertTrue(skill.is_symlink())
-            self.assertEqual(planner.resolve(), (install.SCRIPT_DIR / "agents/planner.md").resolve())
             self.assertEqual(skill.resolve(), (install.SCRIPT_DIR / "skills/code-philosophy").resolve())
+            for agent_name in ("plan", "build", "coder", "researcher", "observer", "documenter", "reviewer"):
+                installed = target / "agents" / f"{agent_name}.md"
+                self.assertTrue(installed.is_symlink())
+                self.assertEqual(installed.resolve(), (install.SCRIPT_DIR / f"agents/{agent_name}.md").resolve())
+            self.assertFalse((target / "agents" / "planner.md").exists())
+            self.assertFalse((target / "agents" / "builder.md").exists())
+            self.assertFalse((target / "agents" / "code-reviewer.md").exists())
             self.assertTrue((target / ".install-state.json").is_file())
 
     def test_local_plugins_link_by_filename(self) -> None:
@@ -402,18 +542,19 @@ class InstallerTests(unittest.TestCase):
             project = Path(directory) / "project"
             agents = project / ".opencode" / "agents"
             agents.mkdir(parents=True)
-            real_file = agents / "planner.md"
+            real_file = agents / "reviewer.md"
             real_file.write_text("user-owned file\n", encoding="utf-8")
-            wrong_link = agents / "builder.md"
+            wrong_link = agents / "researcher.md"
             wrong_link.symlink_to(real_file)
 
             self.assertEqual(install.run(["--target", str(project)]), 0)
             backup_files = [path for path in (project / ".opencode/.install-backups").rglob("*") if path.is_file()]
             self.assertEqual(len(backup_files), 1)
             self.assertEqual(backup_files[0].read_text(encoding="utf-8"), "user-owned file\n")
-            self.assertTrue((agents / "planner.md").is_symlink())
-            self.assertTrue((agents / "builder.md").is_symlink())
-            self.assertEqual((agents / "builder.md").resolve(), (install.SCRIPT_DIR / "agents/builder.md").resolve())
+            self.assertTrue((agents / "reviewer.md").is_symlink())
+            self.assertTrue((agents / "researcher.md").is_symlink())
+            self.assertEqual((agents / "reviewer.md").resolve(), (install.SCRIPT_DIR / "agents/reviewer.md").resolve())
+            self.assertEqual((agents / "researcher.md").resolve(), (install.SCRIPT_DIR / "agents/researcher.md").resolve())
 
     def test_config_and_cli_sources_merge_and_bundled_wins(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -471,14 +612,14 @@ class InstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             project = root / "project"
-            external = root / "planner.md"
-            external.write_text("---\ndescription: external planner\n---\nExternal.\n", encoding="utf-8")
+            external = root / "reviewer.md"
+            external.write_text("---\ndescription: external reviewer\n---\nExternal.\n", encoding="utf-8")
             custom = project / ".opencode/agents/custom.md"
             custom.parent.mkdir(parents=True)
             custom.write_text("keep me\n", encoding="utf-8")
             self.assertEqual(install.run(["--target", str(project), "--agent", str(external)]), 0)
-            planner = project / ".opencode/agents/planner.md"
-            self.assertEqual(planner.resolve(), (install.SCRIPT_DIR / "agents/planner.md").resolve())
+            reviewer = project / ".opencode/agents/reviewer.md"
+            self.assertEqual(reviewer.resolve(), (install.SCRIPT_DIR / "agents/reviewer.md").resolve())
             self.assertEqual(custom.read_text(encoding="utf-8"), "keep me\n")
 
     def test_crlf_agent_is_validated(self) -> None:
@@ -498,20 +639,20 @@ class InstallerTests(unittest.TestCase):
             agents.mkdir(parents=True)
             old_target = root / "old.md"
             old_target.write_text("old\n", encoding="utf-8")
-            original = agents / "planner.md"
+            original = agents / "reviewer.md"
             original.symlink_to(old_target)
             real_create = install.create_relative_link
 
-            def fail_planner(destination: Path, expected: Path) -> None:
-                if destination.name == "planner.md":
+            def fail_reviewer(destination: Path, expected: Path) -> None:
+                if destination.name == "reviewer.md":
                     raise OSError("injected link failure")
                 real_create(destination, expected)
 
-            with mock.patch.object(install, "create_relative_link", side_effect=fail_planner):
+            with mock.patch.object(install, "create_relative_link", side_effect=fail_reviewer):
                 self.assertEqual(install.run(["--target", str(project)]), 1)
             self.assertTrue(original.is_symlink())
             self.assertEqual(original.readlink(), old_target)
-            self.assertFalse((agents / "builder.md").exists())
+            self.assertFalse((agents / "researcher.md").exists())
 
     def test_html_skill_collection_downloads_support_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -595,10 +736,10 @@ class InstallerTests(unittest.TestCase):
             "https://github.com/example/repository/tree/main/.claude/skills"
         )
         blob = install.parse_github_url(
-            "https://github.com/example/repository/blob/main/agents/planner.md"
+            "https://github.com/example/repository/blob/main/agents/reviewer.md"
         )
         self.assertEqual(tree, ("example", "repository", "tree", "main", ".claude/skills"))
-        self.assertEqual(blob, ("example", "repository", "blob", "main", "agents/planner.md"))
+        self.assertEqual(blob, ("example", "repository", "blob", "main", "agents/reviewer.md"))
 
 
 if __name__ == "__main__":

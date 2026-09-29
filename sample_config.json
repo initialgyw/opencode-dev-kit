@@ -14,23 +14,21 @@
   },
   "agent-models": {
     "profile1": {
-      "planner": "opus",
-      "builder": "opus",
+      "coder": "opus",
       "researcher": "google",
       "observer": "google",
-      "coder": "opus",
-      "code-reviewer": {
+      "reviewer": {
         "alias": "opus",
         "variant": "high"
-      }
+      },
+      "documenter": "google"
     },
     "profile2": {
-      "planner": "google",
-      "builder": "google",
+      "coder": "google",
       "researcher": "google",
       "observer": "google",
-      "coder": "google",
-      "code-reviewer": "opus"
+      "reviewer": "opus",
+      "documenter": "google"
     }
   },
   "opencode_json": {

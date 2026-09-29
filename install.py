@@ -27,6 +27,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 SCRIPT_DIR = Path(__file__).resolve().parent
 BUNDLED_SENTINEL = "__bundled__"
 VALID_AGENT_MODES = {"primary", "subagent", "all"}
+PROFILE_MANAGED_AGENTS = frozenset({"coder", "researcher", "observer", "reviewer", "documenter"})
 SAFE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -798,6 +799,18 @@ def resolve_agent_routing(
 ) -> dict[str, dict[str, str]]:
     if not assignments:
         return {}
+    unsupported_agents = set(assignments) - PROFILE_MANAGED_AGENTS
+    if unsupported_agents:
+        primary_agents = unsupported_agents & {"plan", "build"}
+        if primary_agents:
+            raise InstallError(
+                "agent-models cannot override manually managed primary agents: "
+                + ", ".join(sorted(primary_agents))
+            )
+        raise InstallError(
+            "agent-models supports only bundled delegated agents: "
+            + ", ".join(sorted(PROFILE_MANAGED_AGENTS))
+        )
     installed_agents = {artifact.name for artifact in artifacts if artifact.kind == "agent"}
     agent_modes = {
         artifact.name: artifact.agent_mode or "all"
@@ -846,9 +859,8 @@ def merge_provider_config(
     target: Path,
     provider_overlays: dict[str, dict[str, object]],
     agent_routing: dict[str, dict[str, str]],
-    runtime_settings: Optional[dict[str, object]] = None,
 ) -> Optional[dict[str, object]]:
-    if not provider_overlays and not agent_routing and not runtime_settings:
+    if not provider_overlays and not agent_routing:
         return None
     if target.is_symlink():
         raise InstallError(f"installation target must not be a symlink: {target}")
@@ -904,17 +916,6 @@ def merge_provider_config(
                 updated_agent.pop("variant", None)
             merged_agents[agent_name] = updated_agent
         merged["agent"] = merged_agents
-    if runtime_settings:
-        for key, value in runtime_settings.items():
-            if key == "subagent_depth":
-                existing_depth = current.get(key, 0)
-                if not isinstance(existing_depth, int) or isinstance(existing_depth, bool) or existing_depth < 0:
-                    raise InstallError("runtime OpenCode config field 'subagent_depth' must be a non-negative integer")
-                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-                    raise InstallError("runtime subagent_depth setting is invalid")
-                merged[key] = max(existing_depth, value)
-            else:
-                merged[key] = value
     return merged
 
 
@@ -1824,18 +1825,10 @@ def prepare_plan(
     selected_profile: Optional[str],
 ) -> InstallPlan:
     resolved_agent_routing = resolve_agent_routing(artifacts, model_aliases, agent_models)
-    needs_nested_delegation = any(
-        artifact.kind == "agent"
-        and artifact.name in {"planner", "builder"}
-        and artifact.agent_mode == "subagent"
-        for artifact in artifacts
-    )
-    runtime_settings = {"subagent_depth": 2} if needs_nested_delegation else None
     runtime_config = merge_provider_config(
         target,
         provider_overlays,
         resolved_agent_routing,
-        runtime_settings,
     )
     cache_root = target / ".install-cache"
     backup_root = target / ".install-backups" / f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
