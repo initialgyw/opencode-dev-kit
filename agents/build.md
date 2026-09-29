@@ -20,6 +20,7 @@ permission:
     "*": ask
     "git *": allow
     "python3 *": allow
+    "gh *": allow
   tool: allow
   task:
     "*": deny
