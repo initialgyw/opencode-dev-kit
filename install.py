@@ -27,7 +27,19 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 SCRIPT_DIR = Path(__file__).resolve().parent
 BUNDLED_SENTINEL = "__bundled__"
 VALID_AGENT_MODES = {"primary", "subagent", "all"}
-PROFILE_MANAGED_AGENTS = frozenset({"coder", "researcher", "observer", "reviewer", "documenter"})
+PROFILE_MANAGED_AGENT_ORDER = ("coder", "researcher", "observer", "reviewer", "documenter")
+PROFILE_MANAGED_AGENTS = frozenset(PROFILE_MANAGED_AGENT_ORDER)
+LIST_PROFILES_IGNORED_OPTIONS = (
+    "--target",
+    "--profile",
+    "--skill",
+    "--skills",
+    "--agent",
+    "--agents",
+    "--plugin",
+    "--plugins",
+    "--dry-run",
+)
 SAFE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -59,7 +71,7 @@ class InstallerConfig:
     plugins: list[str]
     providers: dict[str, dict[str, object]]
     model_aliases: dict[str, object]
-    agent_models: dict[str, object]
+    agent_models: dict[str, dict[str, object]]
 
 
 @dataclass
@@ -260,7 +272,10 @@ def read_limited(response, limit: int) -> bytes:
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Symlink bundled and external OpenCode agents, skills, and plugins into .opencode/."
+        description=(
+            "Install bundled and external OpenCode agents, skills, and plugins into .opencode/, "
+            "or list configured agent-model profiles."
+        )
     )
     parser.add_argument(
         "--target",
@@ -272,7 +287,19 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         nargs="?",
         const="config.json",
         metavar="PATH",
-        help="merge sources from PATH, or ./config.json when PATH is omitted",
+        help=(
+            "load PATH (installs merge its sources), or ./config.json when PATH is omitted; "
+            "required by --list-profiles"
+        ),
+    )
+    parser.add_argument(
+        "--list-profiles",
+        action="store_true",
+        help=(
+            "list configured agent-model profiles from --config and exit; requires --config; recognized "
+            "installation options are ignored: "
+            f"{', '.join(LIST_PROFILES_IGNORED_OPTIONS)}"
+        ),
     )
     parser.add_argument(
         "--profile",
@@ -342,6 +369,13 @@ def resolve_target(raw_target: Optional[Path]) -> Path:
     if target.name == ".opencode":
         return target.absolute()
     return target.resolve() / ".opencode"
+
+
+def resolve_config_path(raw_config: str) -> Path:
+    config_path = Path(raw_config).expanduser()
+    if not config_path.is_absolute():
+        config_path = Path.cwd() / config_path
+    return config_path.resolve()
 
 
 def is_url(value: str) -> bool:
@@ -737,10 +771,7 @@ def build_sources(
     agent_profiles: dict[str, dict[str, object]] = {}
     config_base = Path.cwd()
     if args.config is not None:
-        config_path = Path(args.config).expanduser()
-        if not config_path.is_absolute():
-            config_path = Path.cwd() / config_path
-        config_path = config_path.resolve()
+        config_path = resolve_config_path(args.config)
         config = load_config(config_path)
         config_base = config_path.parent
         provider_overlays = config.providers
@@ -792,13 +823,9 @@ def deep_merge(existing: object, incoming: object) -> object:
     return incoming
 
 
-def resolve_agent_routing(
-    artifacts: list[Artifact],
-    model_aliases: dict[str, object],
-    assignments: dict[str, object],
-) -> dict[str, dict[str, str]]:
+def validate_profile_assignment_agents(assignments: dict[str, object]) -> None:
     if not assignments:
-        return {}
+        return
     unsupported_agents = set(assignments) - PROFILE_MANAGED_AGENTS
     if unsupported_agents:
         primary_agents = unsupported_agents & {"plan", "build"}
@@ -811,16 +838,12 @@ def resolve_agent_routing(
             "agent-models supports only bundled delegated agents: "
             + ", ".join(sorted(PROFILE_MANAGED_AGENTS))
         )
-    installed_agents = {artifact.name for artifact in artifacts if artifact.kind == "agent"}
-    agent_modes = {
-        artifact.name: artifact.agent_mode or "all"
-        for artifact in artifacts
-        if artifact.kind == "agent"
-    }
-    unknown_agents = set(assignments) - installed_agents
-    if unknown_agents:
-        raise InstallError("agent-models references unknown agents: " + ", ".join(sorted(unknown_agents)))
 
+
+def resolve_profile_models(
+    model_aliases: dict[str, object],
+    assignments: dict[str, object],
+) -> dict[str, dict[str, str]]:
     def resolve_alias(alias: str, context: str) -> tuple[str, Optional[str]]:
         normalized = normalize_alias(alias, context)
         if normalized not in model_aliases:
@@ -848,11 +871,74 @@ def resolve_agent_routing(
         if variant is None and alias_variant is not None:
             variant = alias_variant
         resolved[agent_name] = {
-            "mode": agent_modes[agent_name],
             "model": model,
             **({"variant": variant} if variant else {}),
         }
     return resolved
+
+
+def escape_terminal_controls(value: str) -> str:
+    return "".join(
+        character if character.isprintable() else character.encode("unicode_escape").decode("ascii")
+        for character in value
+    )
+
+
+def print_agent_model_profiles(
+    profiles: dict[str, dict[str, object]],
+    model_aliases: dict[str, object],
+) -> None:
+    resolved_profiles: list[tuple[str, dict[str, dict[str, str]]]] = []
+    for profile_name, assignments in profiles.items():
+        try:
+            validate_profile_assignment_agents(assignments)
+            resolved = resolve_profile_models(model_aliases, assignments)
+        except InstallError as exc:
+            raise InstallError(f"agent-models profile {profile_name!r}: {exc}") from exc
+        resolved_profiles.append((profile_name, resolved))
+
+    if not resolved_profiles:
+        print("No agent-model profiles found.")
+    else:
+        print("Configured agent-model profiles:")
+        for profile_name, assignments in resolved_profiles:
+            print(f"Profile: {escape_terminal_controls(profile_name)}")
+            for agent_name in PROFILE_MANAGED_AGENT_ORDER:
+                assignment = assignments.get(agent_name)
+                if assignment is None:
+                    print(f"  {agent_name}: not assigned")
+                    continue
+                variant = f" ({escape_terminal_controls(assignment['variant'])})" if "variant" in assignment else ""
+                model = escape_terminal_controls(assignment["model"])
+                print(f"  {agent_name}: {model}{variant}")
+    print(
+        "Note: plan and build are not profile-controlled. These are config assignments only; "
+        "target runtime config is not read."
+    )
+
+
+def resolve_agent_routing(
+    artifacts: list[Artifact],
+    model_aliases: dict[str, object],
+    assignments: dict[str, object],
+) -> dict[str, dict[str, str]]:
+    if not assignments:
+        return {}
+    validate_profile_assignment_agents(assignments)
+    installed_agents = {artifact.name for artifact in artifacts if artifact.kind == "agent"}
+    agent_modes = {
+        artifact.name: artifact.agent_mode or "all"
+        for artifact in artifacts
+        if artifact.kind == "agent"
+    }
+    unknown_agents = set(assignments) - installed_agents
+    if unknown_agents:
+        raise InstallError("agent-models references unknown agents: " + ", ".join(sorted(unknown_agents)))
+    resolved_models = resolve_profile_models(model_aliases, assignments)
+    return {
+        agent_name: {"mode": agent_modes[agent_name], **assignment}
+        for agent_name, assignment in resolved_models.items()
+    }
 
 
 def merge_provider_config(
@@ -2106,9 +2192,21 @@ def print_plan(plan: InstallPlan, dry_run: bool) -> None:
         print(f"  {message}")
 
 
+def require_list_profiles_config(args: argparse.Namespace) -> str:
+    if args.config is None:
+        raise InstallError("--list-profiles requires --config [PATH] (PATH defaults to ./config.json when omitted)")
+    return args.config
+
+
 def run(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
     try:
+        if args.list_profiles:
+            config_path = resolve_config_path(require_list_profiles_config(args))
+            config = load_config(config_path)
+            print_agent_model_profiles(config.agent_models, config.model_aliases)
+            return 0
+
         target = resolve_target(args.target)
         sources, provider_overlays, model_aliases, agent_profiles = build_sources(args)
         if args.profile is not None:

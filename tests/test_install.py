@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import http.server
+import io
 import json
 import socketserver
 import stat
@@ -35,6 +36,13 @@ def directory_server(root: Path):
 
 
 class InstallerTests(unittest.TestCase):
+    def run_captured(self, arguments: list[str]) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = install.run(arguments)
+        return result, stdout.getvalue(), stderr.getvalue()
+
     def test_bundled_agent_inventory_and_delegation_boundaries(self) -> None:
         agents_dir = install.SCRIPT_DIR / "agents"
         for agent_name in ("plan", "build", "coder", "researcher", "observer", "documenter", "reviewer"):
@@ -93,7 +101,493 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("edit: false", reviewer)
         self.assertIn("write: false", reviewer)
         self.assertIn('"*": deny', reviewer)
-        self.assertNotIn('"researcher": allow', reviewer)
+        self.assertIn('"researcher": allow', reviewer)
+
+    def test_plan_routes_static_documentation_research_to_researcher(self) -> None:
+        plan = (install.SCRIPT_DIR / "agents/plan.md").read_text(encoding="utf-8")
+
+        self.assertIn("For documentation-only planning, especially README updates", plan)
+        self.assertIn(
+            "delegate `researcher` to inspect the target document and relevant source of truth",
+            plan,
+        )
+        self.assertIn("bounded, cited summary into the plan", plan)
+        self.assertIn(
+            "`observer` only when current runtime, host, service, or deployment evidence is actually part of the question or acceptance criteria",
+            plan,
+        )
+        self.assertIn("Do not call it for static README research", plan)
+        self.assertIn("operational incidents and runtime questions", plan)
+
+    def test_plan_requires_concrete_documentation_proposals(self) -> None:
+        plan = (install.SCRIPT_DIR / "agents/plan.md").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "For every documentation-only plan, especially README work, include concrete proposed edits: what to add, change, or remove and where in the target document.",
+            plan,
+        )
+        self.assertIn(
+            "Tie each proposed edit to the researched source of truth and the relevant acceptance criteria.",
+            plan,
+        )
+
+    def test_plan_handoff_carries_complete_research_for_all_plan_types(self) -> None:
+        plan = (install.SCRIPT_DIR / "agents/plan.md").read_text(encoding="utf-8")
+        handoff = plan.split("## Parent handoff", 1)[1].split(
+            "## Investigator behavior", 1
+        )[0]
+
+        self.assertIn(
+            "Whenever Plan relies on delegated `researcher` or `observer` work, include every bounded summary relied on in the final handoff, regardless of plan type",
+            handoff,
+        )
+        for plan_type in ("implementation", "investigation", "operational", "documentation"):
+            self.assertIn(plan_type, handoff)
+        for field in (
+            "roles used and the evidence each covered",
+            "relevant sources and citations",
+            "findings with their evidence classification and status",
+            "decisions made and their implications for the plan",
+            "assumptions",
+            "unknowns, `CANNOT VERIFY` results, and their resolution needs",
+            "conflicts among sources or findings and how they were reconciled",
+            "acceptance criteria and verification implications",
+            "baseline, time window, and rollback context where applicable",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, handoff)
+        self.assertIn("do not copy raw documents or logs", handoff)
+        self.assertIn("“none identified” or “not applicable”", handoff)
+
+    def test_build_consumes_research_handoff_for_all_plan_types(self) -> None:
+        build = (install.SCRIPT_DIR / "agents/build.md").read_text(encoding="utf-8")
+        handoff = build.split("## Parent handoff", 1)[1].split(
+            "## Clarification gate", 1
+        )[0]
+
+        self.assertIn("consume the complete research-bearing handoff for every plan type", handoff)
+        for plan_type in ("implementation", "investigation", "operational", "documentation"):
+            self.assertIn(plan_type, handoff)
+        self.assertIn("every bounded research/observation summary", handoff)
+        self.assertIn("reuse covered findings rather than repeating research", handoff)
+        for field in (
+            "roles used and the evidence each covered",
+            "relevant sources and citations",
+            "findings with their evidence classification and status",
+            "decisions made and their implications for the plan",
+            "assumptions",
+            "unknowns, `CANNOT VERIFY` results, and their resolution needs",
+            "conflicts among sources or findings and how they were reconciled",
+            "acceptance criteria and verification implications",
+            "baseline, time window, and rollback context where applicable",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, handoff)
+        self.assertIn("not a new research round or a second approval gate", handoff)
+        self.assertIn("request the complete handoff from the user or return to Plan", handoff)
+        self.assertIn("required handoff field is missing or inaccessible", handoff)
+        self.assertIn("do not silently reconstruct all research", handoff)
+        self.assertIn(
+            "Treat explicit “none identified” and “not applicable” entries as part of the handoff",
+            handoff,
+        )
+
+        clarification = build.split("## Clarification gate", 1)[1].split(
+            "## Delegation contract", 1
+        )[0]
+        self.assertIn(
+            "material gap, contradiction, or stale time-sensitive fact",
+            clarification,
+        )
+        self.assertIn(
+            "Re-research only to resolve that named issue",
+            clarification,
+        )
+        self.assertIn(
+            "`researcher` for repository, documentation, configuration, ticket, and upstream evidence",
+            clarification,
+        )
+        self.assertIn("`observer` for current runtime or operational evidence", clarification)
+        self.assertIn("Do not call `observer` for a static README gap", clarification)
+        self.assertIn(
+            "Fresh post-change `observer` verification required by acceptance criteria",
+            clarification,
+        )
+        self.assertIn("not redundant Plan research", clarification)
+
+        documentation_workflow = build.split("## Documentation workflow", 1)[1].split(
+            "## Non-coding workflow", 1
+        )[0]
+        self.assertIn(
+            "For a complete README plan, once the user authorizes execution, dispatch directly to `documenter` without repeating research or calling `observer`",
+            documentation_workflow,
+        )
+
+        coding_workflow = build.split("## Coding workflow", 1)[1].split(
+            "## Documentation workflow", 1
+        )[0]
+        self.assertIn("Delegate implementation and acceptance-criterion verification to `coder`", coding_workflow)
+        self.assertIn("delegate the full change and requirements to `reviewer`", coding_workflow)
+
+    def test_build_always_reviews_documenter_output(self) -> None:
+        build = (install.SCRIPT_DIR / "agents/build.md").read_text(encoding="utf-8")
+        documentation_workflow = build.split("## Documentation workflow", 1)[1].split(
+            "## Non-coding workflow", 1
+        )[0]
+
+        self.assertIn("After every documenter edit, always delegate verification to `reviewer`", documentation_workflow)
+        self.assertIn("exact changed document(s) and diff", documentation_workflow)
+        self.assertIn("bounded approved-plan/source evidence, and acceptance criteria", documentation_workflow)
+        self.assertIn("accuracy, scope, links/examples", documentation_workflow)
+        self.assertIn("not unrelated repository content", documentation_workflow)
+
+    def test_reviewer_supports_focused_documentation_diff_verification(self) -> None:
+        reviewer = (install.SCRIPT_DIR / "agents/reviewer.md").read_text(encoding="utf-8")
+
+        self.assertIn("focused documentation change", reviewer)
+        self.assertIn("For documentation review", reviewer)
+        self.assertIn("exact changed document(s)", reviewer)
+        self.assertIn("bounded plan/source evidence and criteria", reviewer)
+        self.assertIn("Do not inspect unrelated repository content", reviewer)
+        self.assertIn("factual accuracy", reviewer)
+        self.assertIn("affected links/examples", reviewer)
+        self.assertIn("Never modify code, configuration, tests, or repository state", reviewer)
+        self.assertIn("Never run shell commands", reviewer)
+
+    def test_readme_documents_documentation_workflow(self) -> None:
+        readme = (install.SCRIPT_DIR / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "For README plans, Plan delegates `researcher` to read the target README and relevant source of truth; Build reuses that research.",
+            readme,
+        )
+        self.assertIn(
+            "Use `observer` only when current runtime or operational evidence is required, not for static repository or documentation facts.",
+            readme,
+        )
+        self.assertIn("Provide the complete approved plan text, including findings and acceptance criteria", readme)
+        self.assertIn(
+            "If the handoff is unavailable or incomplete, Build requests the handoff or returns to Plan; it re-researches only for a named material gap, conflict, or stale fact.",
+            readme,
+        )
+        self.assertIn(
+            "for any plan type—implementation, investigation, operational, or documentation",
+            readme,
+        )
+        self.assertIn(
+            "the final handoff to Build includes the complete plan and all bounded summaries Plan relied on",
+            readme,
+        )
+        for field in (
+            "roles, sources, and citations",
+            "findings, status, and classification",
+            "decisions and implications",
+            "assumptions",
+            "unknowns, including `CANNOT VERIFY`",
+            "conflicts",
+            "acceptance and verification implications",
+            "baseline, time window, and rollback when relevant",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, readme)
+        self.assertIn("Do not copy raw documents or logs", readme)
+        self.assertIn("mark non-applicable fields `none` or `not applicable`", readme)
+        self.assertIn(
+            "After every `documenter` edit, Build sends the changed documentation, approved plan, and acceptance criteria to `reviewer` for a focused final-diff check",
+            readme,
+        )
+        self.assertNotRegex(readme, r"(?m)^## How it works[ \t]*$")
+        self.assertIn("this prompt is not an enforced shell-permission boundary", readme)
+        self.assertIn("configured permissions must be considered separately", readme)
+
+    def test_list_profiles_resolves_assignments_in_config_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "model-aliases": {
+                            "opus": {"model": "anthropic/claude-opus-5-5", "variant": "high"},
+                            "fast": "google/gemini-3.8-flash",
+                        },
+                        "agent-models": {
+                            "thorough": {
+                                "coder": "OPUS",
+                                "researcher": {"alias": "fast", "variant": "low"},
+                                "observer": {"model": "openai/gpt-5", "variant": "minimal"},
+                                "reviewer": {"alias": "opus", "variant": "max"},
+                            },
+                            "quick": {
+                                "coder": "vendor/coder-model",
+                                "documenter": "fast",
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result, stdout, stderr = self.run_captured(["--list-profiles", "--config", str(config)])
+
+            self.assertEqual(result, 0, stderr)
+            self.assertEqual(stderr, "")
+            lines = stdout.splitlines()
+            thorough_index = lines.index("Profile: thorough")
+            quick_index = lines.index("Profile: quick")
+            self.assertLess(thorough_index, quick_index)
+            self.assertEqual(
+                lines[thorough_index + 1 : thorough_index + 6],
+                [
+                    "  coder: anthropic/claude-opus-5-5 (high)",
+                    "  researcher: google/gemini-3.8-flash (low)",
+                    "  observer: openai/gpt-5 (minimal)",
+                    "  reviewer: anthropic/claude-opus-5-5 (max)",
+                    "  documenter: not assigned",
+                ],
+            )
+            self.assertEqual(
+                lines[quick_index + 1 : quick_index + 6],
+                [
+                    "  coder: vendor/coder-model",
+                    "  researcher: not assigned",
+                    "  observer: not assigned",
+                    "  reviewer: not assigned",
+                    "  documenter: google/gemini-3.8-flash",
+                ],
+            )
+            self.assertIn("plan and build are not profile-controlled", stdout)
+            self.assertIn("target runtime config is not read", stdout)
+
+    def test_list_profiles_escapes_terminal_controls_in_config_values(self) -> None:
+        profile_name = "profile-λ\x1b[31m"
+        model_id = "vendor/模型\x1b[31m"
+        variant = "高\x07"
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "agent-models": {
+                            profile_name: {"coder": {"model": model_id, "variant": variant}}
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result, stdout, stderr = self.run_captured(["--list-profiles", "--config", str(config)])
+
+            self.assertEqual(result, 0, stderr)
+            self.assertEqual(stderr, "")
+            self.assertIn("Profile: profile-λ\\x1b[31m", stdout)
+            self.assertIn("  coder: vendor/模型\\x1b[31m (高\\x07)", stdout)
+            self.assertFalse(
+                any(not character.isprintable() and character != "\n" for character in stdout),
+                "stdout contains a raw terminal control character",
+            )
+
+    def test_list_profiles_handles_empty_config_and_optional_config_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config.json").write_text("{}", encoding="utf-8")
+            with mock.patch.object(install.Path, "cwd", return_value=root):
+                result, stdout, stderr = self.run_captured(["--list-profiles", "--config"])
+
+            self.assertEqual(result, 0, stderr)
+            self.assertEqual(stderr, "")
+            self.assertIn("No agent-model profiles found.", stdout)
+            self.assertIn("plan and build are not profile-controlled", stdout)
+            self.assertFalse((root / ".opencode").exists())
+
+    def test_list_profiles_requires_config(self) -> None:
+        result, stdout, stderr = self.run_captured(["--list-profiles"])
+
+        self.assertEqual(result, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("error: --list-profiles requires --config [PATH]", stderr)
+
+    def test_list_profiles_reports_missing_and_malformed_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            missing_config = root / "missing.json"
+            malformed_config = root / "malformed.json"
+            malformed_config.write_text("{", encoding="utf-8")
+
+            for config, expected_error in (
+                (missing_config, "config file does not exist"),
+                (malformed_config, "invalid JSON/JSONC"),
+            ):
+                with self.subTest(config=config.name):
+                    result, stdout, stderr = self.run_captured(
+                        ["--list-profiles", "--config", str(config)]
+                    )
+                    self.assertEqual(result, 1)
+                    self.assertEqual(stdout, "")
+                    self.assertIn(expected_error, stderr)
+
+    def test_list_profiles_fails_clearly_on_unresolved_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "agent-models": {
+                            "valid-first": {"coder": "vendor/coder-model"},
+                            "broken-profile": {"coder": {"alias": "missing"}},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result, stdout, stderr = self.run_captured(["--list-profiles", "--config", str(config)])
+
+            self.assertEqual(result, 1)
+            self.assertEqual(stdout, "")
+            self.assertIn("agent-models profile 'broken-profile'", stderr)
+            self.assertIn("references unknown model alias: 'missing'", stderr)
+
+    def test_list_profiles_rejects_unsupported_assignments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.json"
+            for agent_name, expected_error in (
+                ("plan", "cannot override manually managed primary agents: plan"),
+                ("diagnostician", "supports only bundled delegated agents"),
+            ):
+                with self.subTest(agent=agent_name):
+                    config.write_text(
+                        json.dumps(
+                            {"agent-models": {"selected": {agent_name: "vendor/model"}}}
+                        ),
+                        encoding="utf-8",
+                    )
+                    result, stdout, stderr = self.run_captured(["--list-profiles", "--config", str(config)])
+                    self.assertEqual(result, 1)
+                    self.assertEqual(stdout, "")
+                    self.assertIn("agent-models profile 'selected'", stderr)
+                    self.assertIn(expected_error, stderr)
+
+    def test_list_profiles_argparse_errors_for_unknown_and_incomplete_options(self) -> None:
+        invalid_arguments = (
+            (
+                ["--list-profiles", "--config", "config.json", "--unknown"],
+                "unrecognized arguments: --unknown",
+            ),
+            (
+                ["--list-profiles", "--config", "config.json", "--plugin"],
+                "argument --plugin: expected one argument",
+            ),
+        )
+        for arguments, expected_error in invalid_arguments:
+            with self.subTest(arguments=arguments):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    with self.assertRaises(SystemExit) as raised:
+                        install.parse_args(arguments)
+
+                self.assertEqual(raised.exception.code, 2)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertIn(expected_error, stderr.getvalue())
+
+    def test_list_profiles_help_documents_ignored_options(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit) as raised:
+            install.parse_args(["--list-profiles", "--help"])
+
+        self.assertEqual(raised.exception.code, 0)
+        help_text = " ".join(stdout.getvalue().split())
+        self.assertIn("requires --config", help_text)
+        self.assertIn("recognized installation options are ignored", help_text)
+        for option in (
+            "--target",
+            "--profile",
+            "--skill",
+            "--skills",
+            "--agent",
+            "--agents",
+            "--plugin",
+            "--plugins",
+            "--dry-run",
+        ):
+            self.assertIn(option, help_text)
+
+    def test_list_profiles_ignores_install_options_without_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "project"
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "skills": ["https://example.invalid/configured-skills/"],
+                        "agents": ["https://example.invalid/configured-agents/"],
+                        "plugins": ["https://example.invalid/configured-plugin.js"],
+                        "agent-models": {
+                            "selected": {"coder": "vendor/coder-model"},
+                            "another-profile": {"researcher": "vendor/researcher-model"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            base_result, base_stdout, base_stderr = self.run_captured(
+                ["--list-profiles", "--config", str(config)]
+            )
+            self.assertEqual(base_result, 0, base_stderr)
+            self.assertEqual(base_stderr, "")
+
+            ignored_options = [
+                "--target",
+                str(target),
+                "--profile",
+                "nonexistent-profile",
+                "--skill",
+                "https://example.invalid/skill.md",
+                "--skills",
+                "https://example.invalid/skills/",
+                "--agent",
+                "https://example.invalid/agent.md",
+                "--agents",
+                "https://example.invalid/agents/",
+                "--plugin",
+                "https://example.invalid/plugin.js",
+                "--plugins",
+                "https://example.invalid/plugins/",
+                "--dry-run",
+            ]
+            with (
+                mock.patch.object(
+                    install, "resolve_target", side_effect=AssertionError("target resolution")
+                ) as resolve_target,
+                mock.patch.object(
+                    install, "build_sources", side_effect=AssertionError("source resolution")
+                ) as build_sources,
+                mock.patch.object(
+                    install, "resolve_sources", side_effect=AssertionError("source downloads")
+                ) as resolve_sources,
+                mock.patch.object(
+                    install, "prepare_plan", side_effect=AssertionError("install preparation")
+                ) as prepare_plan,
+                mock.patch.object(
+                    install, "apply_plan", side_effect=AssertionError("install writes")
+                ) as apply_plan,
+            ):
+                result, stdout, stderr = self.run_captured(
+                    ["--list-profiles", "--config", str(config), *ignored_options]
+                )
+
+            self.assertEqual(result, 0, stderr)
+            self.assertEqual(stderr, "")
+            self.assertEqual(stdout, base_stdout)
+            self.assertIn("Profile: selected", stdout)
+            self.assertIn("Profile: another-profile", stdout)
+            resolve_target.assert_not_called()
+            build_sources.assert_not_called()
+            resolve_sources.assert_not_called()
+            prepare_plan.assert_not_called()
+            apply_plan.assert_not_called()
+            self.assertFalse(target.exists())
 
     def test_agent_model_aliases_and_variants_write_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
