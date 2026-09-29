@@ -5,6 +5,7 @@ tools:
   edit: true
   write: true
   bash: true
+  tool: true
 permission:
   "*": ask
   todowrite: allow
@@ -15,7 +16,11 @@ permission:
   lsp: allow
   edit: allow
   write: allow
-  bash: ask
+  bash:
+    "*": ask
+    "git *": allow
+    "python3 *": allow
+  tool: allow
   task:
     "*": deny
     researcher: allow

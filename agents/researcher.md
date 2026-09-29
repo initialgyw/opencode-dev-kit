@@ -10,6 +10,9 @@ permission:
   "*": ask
   edit: deny
   write: deny
+  glob: allow
+  read: allow
+  grep: allow
   bash:
     "*": ask
     "grep *": allow

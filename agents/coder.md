@@ -6,9 +6,12 @@ tools:
   write: true
   bash: true
   gopls_*: true
+  skill: true
 permission:
   task:
     "*": deny
+    "researcher": allow
+  skill: allow
 ---
 You are a principal software engineer responsible for one scoped implementation.
 

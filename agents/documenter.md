@@ -12,19 +12,9 @@ permission:
   grep: allow
   list: allow
   edit:
-    "*": deny
+    "*": ask
     "**/*.md": allow
     "**/*.txt": allow
-    "**/agent/**": deny
-    "**/agents/**": deny
-    "**/command/**": deny
-    "**/commands/**": deny
-    "**/skill/**": deny
-    "**/skills/**": deny
-    "**/AGENTS.md": deny
-    "AGENTS.md": deny
-    "**/.*/**": deny
-    "**/SKILL.md": deny
   write:
     "*": deny
     "**/*.md": allow

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import http.server
+import io
 import json
 import socketserver
 import stat
@@ -35,6 +36,13 @@ def directory_server(root: Path):
 
 
 class InstallerTests(unittest.TestCase):
+    def run_captured(self, arguments: list[str]) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = install.run(arguments)
+        return result, stdout.getvalue(), stderr.getvalue()
+
     def test_bundled_agent_inventory_and_delegation_boundaries(self) -> None:
         agents_dir = install.SCRIPT_DIR / "agents"
         for agent_name in ("plan", "build", "coder", "researcher", "observer", "documenter", "reviewer"):
@@ -93,7 +101,296 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("edit: false", reviewer)
         self.assertIn("write: false", reviewer)
         self.assertIn('"*": deny', reviewer)
-        self.assertNotIn('"researcher": allow', reviewer)
+        self.assertIn('"researcher": allow', reviewer)
+
+    def test_list_profiles_resolves_assignments_in_config_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "model-aliases": {
+                            "opus": {"model": "anthropic/claude-opus-5-5", "variant": "high"},
+                            "fast": "google/gemini-3.8-flash",
+                        },
+                        "agent-models": {
+                            "thorough": {
+                                "coder": "OPUS",
+                                "researcher": {"alias": "fast", "variant": "low"},
+                                "observer": {"model": "openai/gpt-5", "variant": "minimal"},
+                                "reviewer": {"alias": "opus", "variant": "max"},
+                            },
+                            "quick": {
+                                "coder": "vendor/coder-model",
+                                "documenter": "fast",
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result, stdout, stderr = self.run_captured(["--list-profiles", "--config", str(config)])
+
+            self.assertEqual(result, 0, stderr)
+            self.assertEqual(stderr, "")
+            lines = stdout.splitlines()
+            thorough_index = lines.index("Profile: thorough")
+            quick_index = lines.index("Profile: quick")
+            self.assertLess(thorough_index, quick_index)
+            self.assertEqual(
+                lines[thorough_index + 1 : thorough_index + 6],
+                [
+                    "  coder: anthropic/claude-opus-5-5 (high)",
+                    "  researcher: google/gemini-3.8-flash (low)",
+                    "  observer: openai/gpt-5 (minimal)",
+                    "  reviewer: anthropic/claude-opus-5-5 (max)",
+                    "  documenter: not assigned",
+                ],
+            )
+            self.assertEqual(
+                lines[quick_index + 1 : quick_index + 6],
+                [
+                    "  coder: vendor/coder-model",
+                    "  researcher: not assigned",
+                    "  observer: not assigned",
+                    "  reviewer: not assigned",
+                    "  documenter: google/gemini-3.8-flash",
+                ],
+            )
+            self.assertIn("plan and build are not profile-controlled", stdout)
+            self.assertIn("target runtime config is not read", stdout)
+
+    def test_list_profiles_escapes_terminal_controls_in_config_values(self) -> None:
+        profile_name = "profile-λ\x1b[31m"
+        model_id = "vendor/模型\x1b[31m"
+        variant = "高\x07"
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "agent-models": {
+                            profile_name: {"coder": {"model": model_id, "variant": variant}}
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result, stdout, stderr = self.run_captured(["--list-profiles", "--config", str(config)])
+
+            self.assertEqual(result, 0, stderr)
+            self.assertEqual(stderr, "")
+            self.assertIn("Profile: profile-λ\\x1b[31m", stdout)
+            self.assertIn("  coder: vendor/模型\\x1b[31m (高\\x07)", stdout)
+            self.assertFalse(
+                any(not character.isprintable() and character != "\n" for character in stdout),
+                "stdout contains a raw terminal control character",
+            )
+
+    def test_list_profiles_handles_empty_config_and_optional_config_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config.json").write_text("{}", encoding="utf-8")
+            with mock.patch.object(install.Path, "cwd", return_value=root):
+                result, stdout, stderr = self.run_captured(["--list-profiles", "--config"])
+
+            self.assertEqual(result, 0, stderr)
+            self.assertEqual(stderr, "")
+            self.assertIn("No agent-model profiles found.", stdout)
+            self.assertIn("plan and build are not profile-controlled", stdout)
+            self.assertFalse((root / ".opencode").exists())
+
+    def test_list_profiles_requires_config(self) -> None:
+        result, stdout, stderr = self.run_captured(["--list-profiles"])
+
+        self.assertEqual(result, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("error: --list-profiles requires --config [PATH]", stderr)
+
+    def test_list_profiles_reports_missing_and_malformed_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            missing_config = root / "missing.json"
+            malformed_config = root / "malformed.json"
+            malformed_config.write_text("{", encoding="utf-8")
+
+            for config, expected_error in (
+                (missing_config, "config file does not exist"),
+                (malformed_config, "invalid JSON/JSONC"),
+            ):
+                with self.subTest(config=config.name):
+                    result, stdout, stderr = self.run_captured(
+                        ["--list-profiles", "--config", str(config)]
+                    )
+                    self.assertEqual(result, 1)
+                    self.assertEqual(stdout, "")
+                    self.assertIn(expected_error, stderr)
+
+    def test_list_profiles_fails_clearly_on_unresolved_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "agent-models": {
+                            "valid-first": {"coder": "vendor/coder-model"},
+                            "broken-profile": {"coder": {"alias": "missing"}},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result, stdout, stderr = self.run_captured(["--list-profiles", "--config", str(config)])
+
+            self.assertEqual(result, 1)
+            self.assertEqual(stdout, "")
+            self.assertIn("agent-models profile 'broken-profile'", stderr)
+            self.assertIn("references unknown model alias: 'missing'", stderr)
+
+    def test_list_profiles_rejects_unsupported_assignments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config.json"
+            for agent_name, expected_error in (
+                ("plan", "cannot override manually managed primary agents: plan"),
+                ("diagnostician", "supports only bundled delegated agents"),
+            ):
+                with self.subTest(agent=agent_name):
+                    config.write_text(
+                        json.dumps(
+                            {"agent-models": {"selected": {agent_name: "vendor/model"}}}
+                        ),
+                        encoding="utf-8",
+                    )
+                    result, stdout, stderr = self.run_captured(["--list-profiles", "--config", str(config)])
+                    self.assertEqual(result, 1)
+                    self.assertEqual(stdout, "")
+                    self.assertIn("agent-models profile 'selected'", stderr)
+                    self.assertIn(expected_error, stderr)
+
+    def test_list_profiles_argparse_errors_for_unknown_and_incomplete_options(self) -> None:
+        invalid_arguments = (
+            (
+                ["--list-profiles", "--config", "config.json", "--unknown"],
+                "unrecognized arguments: --unknown",
+            ),
+            (
+                ["--list-profiles", "--config", "config.json", "--plugin"],
+                "argument --plugin: expected one argument",
+            ),
+        )
+        for arguments, expected_error in invalid_arguments:
+            with self.subTest(arguments=arguments):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    with self.assertRaises(SystemExit) as raised:
+                        install.parse_args(arguments)
+
+                self.assertEqual(raised.exception.code, 2)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertIn(expected_error, stderr.getvalue())
+
+    def test_list_profiles_help_documents_ignored_options(self) -> None:
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit) as raised:
+            install.parse_args(["--list-profiles", "--help"])
+
+        self.assertEqual(raised.exception.code, 0)
+        help_text = " ".join(stdout.getvalue().split())
+        self.assertIn("requires --config", help_text)
+        self.assertIn("recognized installation options are ignored", help_text)
+        for option in (
+            "--target",
+            "--profile",
+            "--skill",
+            "--skills",
+            "--agent",
+            "--agents",
+            "--plugin",
+            "--plugins",
+            "--dry-run",
+        ):
+            self.assertIn(option, help_text)
+
+    def test_list_profiles_ignores_install_options_without_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "project"
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "skills": ["https://example.invalid/configured-skills/"],
+                        "agents": ["https://example.invalid/configured-agents/"],
+                        "plugins": ["https://example.invalid/configured-plugin.js"],
+                        "agent-models": {
+                            "selected": {"coder": "vendor/coder-model"},
+                            "another-profile": {"researcher": "vendor/researcher-model"},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            base_result, base_stdout, base_stderr = self.run_captured(
+                ["--list-profiles", "--config", str(config)]
+            )
+            self.assertEqual(base_result, 0, base_stderr)
+            self.assertEqual(base_stderr, "")
+
+            ignored_options = [
+                "--target",
+                str(target),
+                "--profile",
+                "nonexistent-profile",
+                "--skill",
+                "https://example.invalid/skill.md",
+                "--skills",
+                "https://example.invalid/skills/",
+                "--agent",
+                "https://example.invalid/agent.md",
+                "--agents",
+                "https://example.invalid/agents/",
+                "--plugin",
+                "https://example.invalid/plugin.js",
+                "--plugins",
+                "https://example.invalid/plugins/",
+                "--dry-run",
+            ]
+            with (
+                mock.patch.object(
+                    install, "resolve_target", side_effect=AssertionError("target resolution")
+                ) as resolve_target,
+                mock.patch.object(
+                    install, "build_sources", side_effect=AssertionError("source resolution")
+                ) as build_sources,
+                mock.patch.object(
+                    install, "resolve_sources", side_effect=AssertionError("source downloads")
+                ) as resolve_sources,
+                mock.patch.object(
+                    install, "prepare_plan", side_effect=AssertionError("install preparation")
+                ) as prepare_plan,
+                mock.patch.object(
+                    install, "apply_plan", side_effect=AssertionError("install writes")
+                ) as apply_plan,
+            ):
+                result, stdout, stderr = self.run_captured(
+                    ["--list-profiles", "--config", str(config), *ignored_options]
+                )
+
+            self.assertEqual(result, 0, stderr)
+            self.assertEqual(stderr, "")
+            self.assertEqual(stdout, base_stdout)
+            self.assertIn("Profile: selected", stdout)
+            self.assertIn("Profile: another-profile", stdout)
+            resolve_target.assert_not_called()
+            build_sources.assert_not_called()
+            resolve_sources.assert_not_called()
+            prepare_plan.assert_not_called()
+            apply_plan.assert_not_called()
+            self.assertFalse(target.exists())
 
     def test_agent_model_aliases_and_variants_write_runtime_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

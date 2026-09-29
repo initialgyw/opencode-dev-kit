@@ -4,12 +4,20 @@ mode: primary
 tools:
   edit: false
   write: false
-  bash: false
+  bash: true
+  tool: true
 permission:
   "*": ask
   edit: deny
   write: deny
-  bash: deny
+  bash:
+    "*": ask
+    "git push *": deny
+    "git *": allow
+  todowrite: allow
+  glob: allow
+  read: allow
+  webfetch: allow
   task:
     "*": deny
     researcher: allow

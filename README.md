@@ -2,31 +2,6 @@
 
 Reusable OpenCode agents and skills for planning, investigation, implementation, review, and operational verification.
 
-## How it works
-
-The kit bundles `plan` and `build` as primary entry points that override OpenCode's built-in agents when installed. Planning delegates evidence gathering to `researcher` and `observer`. Build can perform approved non-coding actions directly, delegates documentation-only edits to `documenter`, coding changes to `coder`, clarification and verification to `researcher` and `observer`, and coding review to `reviewer`.
-
-```mermaid
-flowchart TD
-    U[User] --> P[Bundled Plan]
-    P --> R[Researcher]
-    P --> O[Observer]
-
-    U --> B[Bundled Build]
-    B --> BR[Researcher]
-    B --> T{Change type?}
-    T -->|Documentation| D[Documenter]
-    D --> B
-    T -->|Coding| C[Coder]
-    C --> V[Reviewer]
-    V --> B
-    T -->|Non-code action| N[Direct approved action]
-    N --> OV[Observer verification]
-    OV --> B
-```
-
-Coding work flows through `coder` and then `reviewer`. Documentation-only work flows through `documenter`. Build may perform approved non-coding actions directly and uses `observer` for outcome verification. When information is missing, plan and build ask both `researcher` and `observer` what to inspect before proceeding. An unexplained failure returns to the primary plan agent for evidence-backed investigation instead of guessing.
-
 ## Operating principles
 
 - Keep planning, research, observation, implementation, review, and coordination separate.
@@ -77,11 +52,15 @@ Use `--config [PATH]` to merge `skills`, `agents`, and `plugins` source lists pl
 ```shell
 cp sample_config.json config.json
 ./install.py --config config.json --profile profile1
+./install.py --list-profiles --config config.json
+./install.py --list-profiles --config
 ```
 
 `model-aliases` are user-defined names that point to canonical `provider/model-id` values and optional variants. `agent-models` maps bundled delegated agents — `coder`, `researcher`, `observer`, `reviewer`, and `documenter` — through those aliases, canonical IDs, or per-agent overrides. Primary `plan` and `build` models are managed manually in the runtime configuration, and `--profile` rejects assignments for those primary names. Provider and model objects are deep-merged by ID: supplied fields override existing fields while unspecified fields and existing providers remain. The installer maps `opencode_json.providers` to the runtime `provider` key. Use environment-based credential interpolation or a credential-injecting plugin; never commit secrets to the config.
 
-`--profile NAME` requires the explicit `--config` option. If its optional path is omitted, `--config` loads `./config.json`; without `--profile`, content installs normally and existing agent routing is unchanged. Config sources are processed before command-line sources; exact duplicates are deduplicated, differing same-name content fails before the target changes, and bundled content wins a name conflict.
+`--profile NAME` requires the explicit `--config` option. If its optional path is omitted, `--config` loads `./config.json`; in normal install mode without `--profile`, content installs normally and existing agent routing is unchanged. Config sources are processed before command-line sources; exact duplicates are deduplicated, differing same-name content fails before the target changes, and bundled content wins a name conflict.
+
+`--list-profiles` reads the configured profiles in order, resolves aliases and variants, and labels missing agent assignments as `not assigned`. It requires `--config [PATH]` (an omitted path still uses `./config.json`). Recognized installation options — `--target`, `--profile`, `--skill`, `--skills`, `--agent`, `--agents`, `--plugin`, `--plugins`, and `--dry-run` — are ignored in list mode; `--profile` does not filter or validate a profile name, and source or target values are not resolved. `--config` is the only option that affects listing; unknown options and incomplete required arguments still produce argparse errors. Listing is read-only and does not inspect the target runtime config: its output describes configured profile assignments, not the final model OpenCode will use from the target's runtime configuration. `plan` and `build` are not profile-controlled.
 
 ### Repeat runs and restart
 

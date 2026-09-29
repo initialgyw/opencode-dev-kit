@@ -14,9 +14,14 @@ permission:
   list: allow
   lsp: allow
   edit: deny
-  bash: deny
+  bash:
+    "*": ask
+    "git push *": deny
+    "git *": allow
+    "gh repo view *": allow
   task:
     "*": deny
+    "researcher": allow
 ---
 You are a read-only code reviewer. Review one completed implementation against the user's requirements and the surrounding system, not just formatting preferences.
 
