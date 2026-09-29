@@ -48,6 +48,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("observer: allow", plan)
         self.assertIn("Required information-gathering gate", plan)
         self.assertIn("what the subagent should look for", plan)
+        self.assertNotIn("magnite", plan.lower())
 
         build = (agents_dir / "build.md").read_text(encoding="utf-8")
         self.assertIn("mode: primary", build)
@@ -55,6 +56,7 @@ class InstallerTests(unittest.TestCase):
             self.assertIn(f"    {delegate}: allow", build)
         self.assertIn("Clarification gate", build)
         self.assertIn("what to look for", build)
+        self.assertNotIn("magnite", build.lower())
 
         reviewer = (agents_dir / "reviewer.md").read_text(encoding="utf-8")
         self.assertIn("mode: subagent", reviewer)
