@@ -103,6 +103,203 @@ class InstallerTests(unittest.TestCase):
         self.assertIn('"*": deny', reviewer)
         self.assertIn('"researcher": allow', reviewer)
 
+    def test_plan_routes_static_documentation_research_to_researcher(self) -> None:
+        plan = (install.SCRIPT_DIR / "agents/plan.md").read_text(encoding="utf-8")
+
+        self.assertIn("For documentation-only planning, especially README updates", plan)
+        self.assertIn(
+            "delegate `researcher` to inspect the target document and relevant source of truth",
+            plan,
+        )
+        self.assertIn("bounded, cited summary into the plan", plan)
+        self.assertIn(
+            "`observer` only when current runtime, host, service, or deployment evidence is actually part of the question or acceptance criteria",
+            plan,
+        )
+        self.assertIn("Do not call it for static README research", plan)
+        self.assertIn("operational incidents and runtime questions", plan)
+
+    def test_plan_requires_concrete_documentation_proposals(self) -> None:
+        plan = (install.SCRIPT_DIR / "agents/plan.md").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "For every documentation-only plan, especially README work, include concrete proposed edits: what to add, change, or remove and where in the target document.",
+            plan,
+        )
+        self.assertIn(
+            "Tie each proposed edit to the researched source of truth and the relevant acceptance criteria.",
+            plan,
+        )
+
+    def test_plan_handoff_carries_complete_research_for_all_plan_types(self) -> None:
+        plan = (install.SCRIPT_DIR / "agents/plan.md").read_text(encoding="utf-8")
+        handoff = plan.split("## Parent handoff", 1)[1].split(
+            "## Investigator behavior", 1
+        )[0]
+
+        self.assertIn(
+            "Whenever Plan relies on delegated `researcher` or `observer` work, include every bounded summary relied on in the final handoff, regardless of plan type",
+            handoff,
+        )
+        for plan_type in ("implementation", "investigation", "operational", "documentation"):
+            self.assertIn(plan_type, handoff)
+        for field in (
+            "roles used and the evidence each covered",
+            "relevant sources and citations",
+            "findings with their evidence classification and status",
+            "decisions made and their implications for the plan",
+            "assumptions",
+            "unknowns, `CANNOT VERIFY` results, and their resolution needs",
+            "conflicts among sources or findings and how they were reconciled",
+            "acceptance criteria and verification implications",
+            "baseline, time window, and rollback context where applicable",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, handoff)
+        self.assertIn("do not copy raw documents or logs", handoff)
+        self.assertIn("“none identified” or “not applicable”", handoff)
+
+    def test_build_consumes_research_handoff_for_all_plan_types(self) -> None:
+        build = (install.SCRIPT_DIR / "agents/build.md").read_text(encoding="utf-8")
+        handoff = build.split("## Parent handoff", 1)[1].split(
+            "## Clarification gate", 1
+        )[0]
+
+        self.assertIn("consume the complete research-bearing handoff for every plan type", handoff)
+        for plan_type in ("implementation", "investigation", "operational", "documentation"):
+            self.assertIn(plan_type, handoff)
+        self.assertIn("every bounded research/observation summary", handoff)
+        self.assertIn("reuse covered findings rather than repeating research", handoff)
+        for field in (
+            "roles used and the evidence each covered",
+            "relevant sources and citations",
+            "findings with their evidence classification and status",
+            "decisions made and their implications for the plan",
+            "assumptions",
+            "unknowns, `CANNOT VERIFY` results, and their resolution needs",
+            "conflicts among sources or findings and how they were reconciled",
+            "acceptance criteria and verification implications",
+            "baseline, time window, and rollback context where applicable",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, handoff)
+        self.assertIn("not a new research round or a second approval gate", handoff)
+        self.assertIn("request the complete handoff from the user or return to Plan", handoff)
+        self.assertIn("required handoff field is missing or inaccessible", handoff)
+        self.assertIn("do not silently reconstruct all research", handoff)
+        self.assertIn(
+            "Treat explicit “none identified” and “not applicable” entries as part of the handoff",
+            handoff,
+        )
+
+        clarification = build.split("## Clarification gate", 1)[1].split(
+            "## Delegation contract", 1
+        )[0]
+        self.assertIn(
+            "material gap, contradiction, or stale time-sensitive fact",
+            clarification,
+        )
+        self.assertIn(
+            "Re-research only to resolve that named issue",
+            clarification,
+        )
+        self.assertIn(
+            "`researcher` for repository, documentation, configuration, ticket, and upstream evidence",
+            clarification,
+        )
+        self.assertIn("`observer` for current runtime or operational evidence", clarification)
+        self.assertIn("Do not call `observer` for a static README gap", clarification)
+        self.assertIn(
+            "Fresh post-change `observer` verification required by acceptance criteria",
+            clarification,
+        )
+        self.assertIn("not redundant Plan research", clarification)
+
+        documentation_workflow = build.split("## Documentation workflow", 1)[1].split(
+            "## Non-coding workflow", 1
+        )[0]
+        self.assertIn(
+            "For a complete README plan, once the user authorizes execution, dispatch directly to `documenter` without repeating research or calling `observer`",
+            documentation_workflow,
+        )
+
+        coding_workflow = build.split("## Coding workflow", 1)[1].split(
+            "## Documentation workflow", 1
+        )[0]
+        self.assertIn("Delegate implementation and acceptance-criterion verification to `coder`", coding_workflow)
+        self.assertIn("delegate the full change and requirements to `reviewer`", coding_workflow)
+
+    def test_build_always_reviews_documenter_output(self) -> None:
+        build = (install.SCRIPT_DIR / "agents/build.md").read_text(encoding="utf-8")
+        documentation_workflow = build.split("## Documentation workflow", 1)[1].split(
+            "## Non-coding workflow", 1
+        )[0]
+
+        self.assertIn("After every documenter edit, always delegate verification to `reviewer`", documentation_workflow)
+        self.assertIn("exact changed document(s) and diff", documentation_workflow)
+        self.assertIn("bounded approved-plan/source evidence, and acceptance criteria", documentation_workflow)
+        self.assertIn("accuracy, scope, links/examples", documentation_workflow)
+        self.assertIn("not unrelated repository content", documentation_workflow)
+
+    def test_reviewer_supports_focused_documentation_diff_verification(self) -> None:
+        reviewer = (install.SCRIPT_DIR / "agents/reviewer.md").read_text(encoding="utf-8")
+
+        self.assertIn("focused documentation change", reviewer)
+        self.assertIn("For documentation review", reviewer)
+        self.assertIn("exact changed document(s)", reviewer)
+        self.assertIn("bounded plan/source evidence and criteria", reviewer)
+        self.assertIn("Do not inspect unrelated repository content", reviewer)
+        self.assertIn("factual accuracy", reviewer)
+        self.assertIn("affected links/examples", reviewer)
+        self.assertIn("Never modify code, configuration, tests, or repository state", reviewer)
+        self.assertIn("Never run shell commands", reviewer)
+
+    def test_readme_documents_documentation_workflow(self) -> None:
+        readme = (install.SCRIPT_DIR / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "For README plans, Plan delegates `researcher` to read the target README and relevant source of truth; Build reuses that research.",
+            readme,
+        )
+        self.assertIn(
+            "Use `observer` only when current runtime or operational evidence is required, not for static repository or documentation facts.",
+            readme,
+        )
+        self.assertIn("Provide the complete approved plan text, including findings and acceptance criteria", readme)
+        self.assertIn(
+            "If the handoff is unavailable or incomplete, Build requests the handoff or returns to Plan; it re-researches only for a named material gap, conflict, or stale fact.",
+            readme,
+        )
+        self.assertIn(
+            "for any plan type—implementation, investigation, operational, or documentation",
+            readme,
+        )
+        self.assertIn(
+            "the final handoff to Build includes the complete plan and all bounded summaries Plan relied on",
+            readme,
+        )
+        for field in (
+            "roles, sources, and citations",
+            "findings, status, and classification",
+            "decisions and implications",
+            "assumptions",
+            "unknowns, including `CANNOT VERIFY`",
+            "conflicts",
+            "acceptance and verification implications",
+            "baseline, time window, and rollback when relevant",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, readme)
+        self.assertIn("Do not copy raw documents or logs", readme)
+        self.assertIn("mark non-applicable fields `none` or `not applicable`", readme)
+        self.assertIn(
+            "After every `documenter` edit, Build sends the changed documentation, approved plan, and acceptance criteria to `reviewer` for a focused final-diff check",
+            readme,
+        )
+        self.assertNotRegex(readme, r"(?m)^## How it works[ \t]*$")
+        self.assertIn("this prompt is not an enforced shell-permission boundary", readme)
+        self.assertIn("configured permissions must be considered separately", readme)
+
     def test_list_profiles_resolves_assignments_in_config_order(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "config.json"

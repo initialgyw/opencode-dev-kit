@@ -74,13 +74,15 @@ The installed `plan` and `build` modes are the Tab-selectable primary agents. Us
 
 ```text
 Plan mode:
-Describe the implementation plan or investigation needed.
+Describe the implementation plan or investigation needed, or ask Plan to assess a plan. Assessment alone is not authorization to execute it.
 
 Build mode:
-Provide the approved plan text or an exact saved plan path.
+Provide the complete approved plan text, including findings and acceptance criteria, or the exact saved path to it. Explicitly authorize execution.
 ```
 
-`approved` is not a special OpenCode control token. Pass the approved plan text or an exact saved plan path; the build session should not be expected to inherit the complete planning transcript. When more information is needed, plan delegates to both `researcher` and `observer` with specific questions and evidence requirements. Build uses the same clarification gate before implementation or operational action. Build delegates documentation-only edits to `documenter`, coding changes to `coder`, coding review to `reviewer`, and post-change verification to `observer`; approved non-coding actions may be performed directly. Unknown root causes are handed back to plan for evidence-backed investigation rather than guessed.
+`approved` is not a special OpenCode control token, and Build should not be expected to inherit the complete planning transcript. Whenever Plan uses research or observation for any plan type—implementation, investigation, operational, or documentation—the final handoff to Build includes the complete plan and all bounded summaries Plan relied on, not only README research. Summaries include roles, sources, and citations; findings, status, and classification; decisions and implications; assumptions; unknowns, including `CANNOT VERIFY`; conflicts; acceptance and verification implications; and baseline, time window, and rollback when relevant. Do not copy raw documents or logs; mark non-applicable fields `none` or `not applicable`. Build consumes the complete plan. If the handoff is unavailable or incomplete, Build requests the handoff or returns to Plan; it re-researches only for a named material gap, conflict, or stale fact. A completeness/readiness check is not another research or approval round.
+
+For README plans, Plan delegates `researcher` to read the target README and relevant source of truth; Build reuses that research. When the user authorizes execution of a complete README plan, Build delegates the edit to `documenter`. After every `documenter` edit, Build sends the changed documentation, approved plan, and acceptance criteria to `reviewer` for a focused final-diff check before declaring completion. Reviewer checks only the changed documentation, related links/examples, scope, and acceptance criteria—not unrelated files. Use `observer` only when current runtime or operational evidence is required, not for static repository or documentation facts. Build delegates coding changes to `coder`, coding review to `reviewer`, and post-change operational verification to `observer`; approved non-coding actions may be performed directly. Unknown root causes are handed back to Plan for evidence-backed investigation rather than guessed.
 
 ## Agents, skills, and validation
 
@@ -89,11 +91,11 @@ Provide the approved plan text or an exact saved plan path.
 | Component | Role and boundary |
 | --- | --- |
 | Bundled `plan` / `build` | Primary planning and execution modes that override OpenCode built-ins. Their models are managed manually. |
-| `researcher` | Read-only local/public documentation research with cited findings; never runs shell commands or delegates. |
-| `observer` | Read-only state, log, and outcome verification; cannot edit or delegate. Unknown operational tools require an explicitly audited read-only allowlist. |
+| `researcher` | Read-only research of source evidence such as codebase, documentation, tickets, upstream material, and configuration, with cited findings; never runs shell commands or delegates. |
+| `observer` | Read-only verification of current runtime and operational state, logs, and outcomes; not for static repository or documentation facts; cannot edit or delegate. Unknown operational tools require an explicitly audited read-only allowlist. |
 | `documenter` | Edits ordinary Markdown and plain-text documentation only; cannot edit runtime configuration, code, or delegate. |
 | `coder` | Implements delegated coding changes using `code-philosophy`. |
-| `reviewer` | Reviews completed coding changes without editing or running shell commands, using `code-philosophy`. |
+| `reviewer` | Is instructed to review documentation and coding changes without editing or running shell commands; this prompt is not an enforced shell-permission boundary, so configured permissions must be considered separately. Documentation checks are limited to changed docs, related links/examples, scope, and acceptance criteria; coding review uses `code-philosophy`. |
 | `code-philosophy` | Baseline for correct, secure, testable, maintainable implementation and review. |
 | `summarize-investigation` | Evidence-based investigation report skill for timelines, findings, root cause, and remediation. |
 
@@ -111,7 +113,9 @@ python3 -m unittest discover -s tests -v
 Confirm that:
 
 - Installed `plan` and `build` are primary, with `researcher`, `observer`, `documenter`, `coder`, and `reviewer` available as delegated agents.
-- Plan and build ask `researcher` and `observer` for targeted evidence when clarification is needed; build delegates documentation to `documenter`, coding to `coder`, and keeps `observer` and `reviewer` read-only.
+- For implementation, investigation, operational, and documentation plans, whenever Plan uses research or observation, its final handoff to Build contains the complete plan and every bounded summary Plan relied on—not only README research—with the contents listed in Use. If unavailable or incomplete, Build requests the handoff or returns to Plan; it re-researches only for a named material gap, conflict, or stale fact.
+- For README plans, Plan delegates target-README and source-of-truth research to `researcher`; Build reuses that research and delegates authorized edits to `documenter`; `reviewer` checks every `documenter` edit against the approved plan and acceptance criteria. `observer` is used only for current runtime or operational evidence, not static repository or documentation facts.
+- Build delegates coding to `coder`, coding review to `reviewer`, and post-change operational verification to `observer`; `observer` remains read-only. `reviewer` is instructed to perform read-only review, but its prompt does not enforce shell permissions; consider its configured permissions separately.
 - Permission rules match the inventory: content searches may require approval because sensitive paths cannot be excluded from `grep` results.
 - Observer outcomes use `PASS`, `WARN`, `FAIL`, `ERROR`, or `CANNOT VERIFY`; tool and credential failures are not healthy results.
 - Selected plugins appear as symlinks under `.opencode/plugins/` and are not executed by the installer.
